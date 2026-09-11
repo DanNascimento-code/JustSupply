@@ -1,0 +1,34 @@
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Tests, coverage, and quality tools
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Environment variables and local secrets
+.env
+.env.*
+!.env.example
+
+# Python packaging
+build/
+dist/
+*.egg-info/
+
+# Frontend
+node_modules/
+
+# Logs
+*.log
+
+# Operating system files
+Thumbs.db
+.DS_Store
