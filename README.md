@@ -74,6 +74,9 @@ Start PostgreSQL:
 docker compose up -d database
 ```
 
+The container exposes PostgreSQL on host port `5433` to avoid conflicts with local PostgreSQL
+installations that commonly use port `5432`.
+
 Apply the database migrations:
 
 ```powershell

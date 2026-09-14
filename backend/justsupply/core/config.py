@@ -11,7 +11,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    database_url: str = "postgresql+psycopg://justsupply:justsupply@localhost:5432/justsupply"
+    database_url: str = "postgresql+psycopg://justsupply:justsupply@localhost:5433/justsupply"
 
 
 @lru_cache
