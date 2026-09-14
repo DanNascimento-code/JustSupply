@@ -48,18 +48,36 @@ Both interfaces should use the same evidence base while preserving the distincti
 - API health check;
 - create, list, retrieve, update, and delete suppliers;
 - supplier input validation with Pydantic;
-- in-memory repository isolated behind a persistence interface;
+- PostgreSQL persistence with SQLAlchemy;
+- versioned database migrations with Alembic;
+- pgvector-enabled PostgreSQL container;
+- in-memory repository used as an isolated test double;
 - automated API tests, linting, formatting, and static type checking.
 
-The in-memory repository is temporary. PostgreSQL persistence will replace it in a future
-milestone without changing the HTTP contract or business service.
-
 ## Local development
+
+Copy the local environment template:
+
+```powershell
+Copy-Item .env.example .env
+```
 
 Install the project and development tools inside the activated virtual environment:
 
 ```powershell
 python -m pip install --editable ".[dev]"
+```
+
+Start PostgreSQL:
+
+```powershell
+docker compose up -d database
+```
+
+Apply the database migrations:
+
+```powershell
+python -m alembic upgrade head
 ```
 
 Run the quality checks:
@@ -71,6 +89,14 @@ python -m mypy backend\justsupply
 python -m pytest
 ```
 
+Run the PostgreSQL integration test when the database is available:
+
+```powershell
+$env:RUN_DATABASE_TESTS = "1"
+python -m pytest backend\tests\integration
+Remove-Item Env:RUN_DATABASE_TESTS
+```
+
 Start the API:
 
 ```powershell
@@ -78,3 +104,6 @@ python -m uvicorn justsupply.main:app --reload
 ```
 
 Open `http://127.0.0.1:8000/docs` to explore the API with Swagger UI.
+
+The local database credentials in `compose.yaml` are intended only for development. Production
+credentials must be supplied through environment variables and must never be committed.

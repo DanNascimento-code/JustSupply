@@ -1,0 +1,22 @@
+name: justsupply
+
+services:
+  database:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_DB: justsupply
+      POSTGRES_USER: justsupply
+      POSTGRES_PASSWORD: justsupply
+    ports:
+      - "5432:5432"
+    volumes:
+      - justsupply_postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U justsupply -d justsupply"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  justsupply_postgres_data:

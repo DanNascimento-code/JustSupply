@@ -9,7 +9,11 @@ description = "Evidence-based supply-chain due diligence platform."
 readme = "README.md"
 requires-python = ">=3.14,<3.15"
 dependencies = [
+    "alembic==1.20.0",
     "fastapi==0.141.1",
+    "psycopg[binary]==3.3.5",
+    "pydantic-settings==2.15.0",
+    "sqlalchemy==2.0.52",
     "uvicorn[standard]==0.52.4",
 ]
 
@@ -29,6 +33,9 @@ include = ["justsupply*"]
 testpaths = ["backend/tests"]
 pythonpath = ["backend"]
 addopts = "-ra"
+markers = [
+    "integration: tests that require the PostgreSQL service",
+]
 
 [tool.ruff]
 line-length = 100

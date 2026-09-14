@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from justsupply.domain.supplier import Supplier
-from justsupply.repositories.supplier import SupplierRepository
+from justsupply.repositories.supplier import SupplierNameConflictError, SupplierRepository
 from justsupply.schemas.supplier import SupplierCreate, SupplierUpdate
 
 
@@ -30,9 +30,6 @@ class SupplierService:
         return supplier
 
     def create(self, payload: SupplierCreate) -> Supplier:
-        if self._repository.get_by_legal_name(payload.legal_name) is not None:
-            raise SupplierAlreadyExistsError(payload.legal_name)
-
         now = datetime.now(UTC)
         supplier = Supplier(
             id=uuid4(),
@@ -43,14 +40,13 @@ class SupplierService:
             created_at=now,
             updated_at=now,
         )
-        return self._repository.save(supplier)
+        try:
+            return self._repository.save(supplier)
+        except SupplierNameConflictError as error:
+            raise SupplierAlreadyExistsError(payload.legal_name) from error
 
     def update(self, supplier_id: UUID, payload: SupplierUpdate) -> Supplier:
         current_supplier = self.get(supplier_id)
-        supplier_with_same_name = self._repository.get_by_legal_name(payload.legal_name)
-        if supplier_with_same_name is not None and supplier_with_same_name.id != supplier_id:
-            raise SupplierAlreadyExistsError(payload.legal_name)
-
         updated_supplier = current_supplier.model_copy(
             update={
                 "legal_name": payload.legal_name,
@@ -60,7 +56,10 @@ class SupplierService:
                 "updated_at": datetime.now(UTC),
             }
         )
-        return self._repository.save(updated_supplier)
+        try:
+            return self._repository.save(updated_supplier)
+        except SupplierNameConflictError as error:
+            raise SupplierAlreadyExistsError(payload.legal_name) from error
 
     def delete(self, supplier_id: UUID) -> None:
         self.get(supplier_id)

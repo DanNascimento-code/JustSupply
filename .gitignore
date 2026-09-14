@@ -18,6 +18,9 @@ htmlcov/
 .env.*
 !.env.example
 
+# Database data
+postgres-data/
+
 # Python packaging
 build/
 dist/
