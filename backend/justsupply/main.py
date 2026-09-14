@@ -1,12 +1,17 @@
 from fastapi import FastAPI
 
-app = FastAPI(
-    title="JustSupply API",
-    description="Evidence-based supply-chain due diligence API.",
-    version="0.1.0",
-)
+from justsupply.api.routes import health, suppliers
 
 
-@app.get("/health", tags=["system"])
-def health_check() -> dict[str, str]:
-    return {"status": "ok"}
+def create_app() -> FastAPI:
+    application = FastAPI(
+        title="JustSupply API",
+        description="Evidence-based supply-chain due diligence API.",
+        version="0.1.0",
+    )
+    application.include_router(health.router)
+    application.include_router(suppliers.router, prefix="/api/v1")
+    return application
+
+
+app = create_app()

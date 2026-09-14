@@ -43,3 +43,38 @@ Both interfaces should use the same evidence base while preserving the distincti
 - Persistence and migrations: SQLAlchemy and Alembic;
 - Testing: pytest for the backend and React ecosystem testing tools for the frontend.
 
+## Current capabilities
+
+- API health check;
+- create, list, retrieve, update, and delete suppliers;
+- supplier input validation with Pydantic;
+- in-memory repository isolated behind a persistence interface;
+- automated API tests, linting, formatting, and static type checking.
+
+The in-memory repository is temporary. PostgreSQL persistence will replace it in a future
+milestone without changing the HTTP contract or business service.
+
+## Local development
+
+Install the project and development tools inside the activated virtual environment:
+
+```powershell
+python -m pip install --editable ".[dev]"
+```
+
+Run the quality checks:
+
+```powershell
+python -m ruff check .
+python -m ruff format --check .
+python -m mypy backend\justsupply
+python -m pytest
+```
+
+Start the API:
+
+```powershell
+python -m uvicorn justsupply.main:app --reload
+```
+
+Open `http://127.0.0.1:8000/docs` to explore the API with Swagger UI.
