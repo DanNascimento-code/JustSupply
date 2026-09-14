@@ -52,6 +52,9 @@ Both interfaces should use the same evidence base while preserving the distincti
 - versioned database migrations with Alembic;
 - pgvector-enabled PostgreSQL container;
 - in-memory repository used as an isolated test double;
+- React and TypeScript supplier workspace;
+- TanStack Query API synchronization;
+- responsive supplier creation and directory interface;
 - automated API tests, linting, formatting, and static type checking.
 
 ## Local development
@@ -107,6 +110,25 @@ python -m uvicorn justsupply.main:app --reload
 ```
 
 Open `http://127.0.0.1:8000/docs` to explore the API with Swagger UI.
+
+Install and start the frontend in a second terminal:
+
+```powershell
+Set-Location frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173` to use the supplier workspace.
+
+Run the frontend quality checks:
+
+```powershell
+Set-Location frontend
+npm run lint
+npm run test:run
+npm run build
+```
 
 The local database credentials in `compose.yaml` are intended only for development. Production
 credentials must be supplied through environment variables and must never be committed.
