@@ -1,5 +1,7 @@
 from functools import lru_cache
+from typing import Literal
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,6 +18,20 @@ class Settings(BaseSettings):
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ]
+    open_food_facts_base_url: str = "https://world.openfoodfacts.org"
+    open_food_facts_user_agent: str = (
+        "JustSupply/0.1 (https://github.com/DanNascimento-code/JustSupply)"
+    )
+    open_food_facts_timeout_seconds: float = 8.0
+    openai_api_key: SecretStr | None = None
+    openai_model: str = "gpt-5-mini"
+    openai_embedding_model: str = "text-embedding-3-small"
+    openai_embedding_dimensions: Literal[1536] = 1536
+    rag_chunk_target_characters: int = 1200
+    rag_chunk_overlap_characters: int = 200
+    document_max_bytes: int = 5 * 1024 * 1024
+    document_max_characters: int = 100_000
+    document_upload_directory: str = "data/uploads"
 
 
 @lru_cache

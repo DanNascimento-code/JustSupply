@@ -1,7 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from justsupply.api.routes import health, suppliers
+from justsupply.api.routes import (
+    brand_evidence,
+    consumer,
+    document_ingestion,
+    health,
+    rag,
+    suppliers,
+)
 from justsupply.core.config import get_settings
 
 
@@ -20,6 +27,10 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     application.include_router(health.router)
+    application.include_router(consumer.router, prefix="/api/v1")
+    application.include_router(brand_evidence.router, prefix="/api/v1")
+    application.include_router(document_ingestion.router, prefix="/api/v1")
+    application.include_router(rag.router, prefix="/api/v1")
     application.include_router(suppliers.router, prefix="/api/v1")
     return application
 

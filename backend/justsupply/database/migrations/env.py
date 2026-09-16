@@ -4,7 +4,7 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from justsupply.core.config import get_settings
-from justsupply.database.models import SupplierModel
+from justsupply.database import models
 
 config = context.config
 
@@ -12,7 +12,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
-target_metadata = SupplierModel.metadata
+target_metadata = models.SupplierModel.metadata
 
 
 def run_migrations_offline() -> None:

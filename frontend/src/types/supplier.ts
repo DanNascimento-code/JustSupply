@@ -21,11 +21,3 @@ export interface SupplierListResponse {
   items: Supplier[]
   total: number
 }
-
-interface ValidationIssue {
-  msg: string
-}
-
-export interface ApiErrorResponse {
-  detail?: string | ValidationIssue[]
-}

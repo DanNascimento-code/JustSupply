@@ -21,6 +21,9 @@ htmlcov/
 # Database data
 postgres-data/
 
+# Locally ingested evidence documents
+data/uploads/
+
 # Python packaging
 build/
 dist/
