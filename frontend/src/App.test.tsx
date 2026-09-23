@@ -5,7 +5,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import type { BrandClaim } from './types/brandEvidence'
 import type { ConsumerSearchResponse } from './types/consumer'
-import type { EvidenceDocument } from './types/documentIngestion'
+import type {
+  DocumentIngestionJob,
+  EvidenceDocument,
+} from './types/documentIngestion'
 import type { Supplier } from './types/supplier'
 
 const createdSupplier: Supplier = {
@@ -129,6 +132,19 @@ const extractedDocument: EvidenceDocument = {
   ],
 }
 
+const completedIngestionJob: DocumentIngestionJob = {
+  id: 'f9482497-e195-4866-ad3f-3679d83ef7ef',
+  brand_id: pendingBrandClaim.brand_id,
+  document_id: extractedDocument.id,
+  filename: extractedDocument.filename,
+  source_title: extractedDocument.source_title,
+  status: 'completed',
+  error_message: null,
+  created_at: '2026-09-16T11:59:00Z',
+  started_at: '2026-09-16T11:59:01Z',
+  completed_at: '2026-09-16T12:00:00Z',
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -248,6 +264,9 @@ describe('evidence workspace', () => {
       if (url.endsWith('/documents')) {
         return jsonResponse({ items: [extractedDocument], total: 1 })
       }
+      if (url.endsWith('/ingestion-jobs')) {
+        return jsonResponse({ items: [completedIngestionJob], total: 1 })
+      }
       if (url.endsWith('/claims')) {
         return jsonResponse({ items: [], total: 0 })
       }
@@ -326,6 +345,9 @@ describe('evidence workspace', () => {
       if (url.endsWith('/documents')) {
         return jsonResponse({ items: [], total: 0 })
       }
+      if (url.endsWith('/ingestion-jobs')) {
+        return jsonResponse({ items: [], total: 0 })
+      }
       return jsonResponse({ detail: 'Unexpected request.' }, 500)
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -359,6 +381,7 @@ describe('evidence workspace', () => {
   it('uploads a document and approves an AI finding', async () => {
     window.history.pushState({}, '', '/pro/evidence')
     let documents: EvidenceDocument[] = []
+    let jobs: DocumentIngestionJob[] = []
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input.toString()
       if (url.endsWith('/api/v1/evidence/brands')) {
@@ -384,10 +407,14 @@ describe('evidence workspace', () => {
       }
       if (url.endsWith('/documents') && init?.method === 'POST') {
         documents = [extractedDocument]
-        return jsonResponse(extractedDocument, 201)
+        jobs = [completedIngestionJob]
+        return jsonResponse({ ...completedIngestionJob, status: 'queued' }, 202)
       }
       if (url.endsWith('/documents')) {
         return jsonResponse({ items: documents, total: documents.length })
+      }
+      if (url.endsWith('/ingestion-jobs')) {
+        return jsonResponse({ items: jobs, total: jobs.length })
       }
       if (url.endsWith('/claims')) {
         return jsonResponse({ items: [], total: 0 })
@@ -421,7 +448,7 @@ describe('evidence workspace', () => {
       'https://example.org/report',
     )
     const uploadButton = screen.getByRole('button', {
-      name: 'Upload and extract with AI',
+      name: 'Upload and process with AI',
     })
     expect(uploadButton.closest('form')).toBeValid()
     await user.click(uploadButton)

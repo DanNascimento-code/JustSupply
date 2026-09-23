@@ -15,6 +15,7 @@ from justsupply.database.session import SessionFactory
 from justsupply.domain.rag import IndexedChunk, TextChunk
 from justsupply.repositories.document_ingestion import (
     DocumentCreate,
+    DocumentIngestionJobCreate,
     SqlAlchemyDocumentRepository,
 )
 from justsupply.schemas.brand_evidence import EvidenceSourceType, ReviewDecision
@@ -49,6 +50,29 @@ def test_approved_ai_finding_becomes_consumer_claim() -> None:
         )
         session.commit()
         repository = SqlAlchemyDocumentRepository(session)
+        queued_job = repository.create_ingestion_job(
+            DocumentIngestionJobCreate(
+                id=document_id,
+                brand_id=brand_id,
+                document_id=None,
+                filename="impact-report.txt",
+                media_type="text/plain",
+                byte_size=180,
+                content_sha256=unique_suffix.ljust(64, "0"),
+                storage_path=f"data/uploads/{document_id}.txt",
+                source_title="2025 Impact Report",
+                source_provider="Example Organization",
+                source_url=source_url,
+                source_type=EvidenceSourceType.CORPORATE_REPORT,
+                published_at=datetime(2025, 12, 1, tzinfo=UTC),
+                status="queued",
+            )
+        )
+
+        assert queued_job.status == "queued"
+        work_item = repository.start_ingestion_job(document_id)
+        assert work_item is not None
+        assert repository.get_ingestion_job(document_id).status == "processing"
 
         document = repository.create_document(
             DocumentCreate(
@@ -102,9 +126,13 @@ def test_approved_ai_finding_becomes_consumer_claim() -> None:
                 embedding_dimensions=1536,
             )
         )
+        repository.mark_ingestion_job_completed(document_id, document.id)
 
         assert document.findings[0].review_status == "pending"
         assert document.chunk_count == 1
+        completed_job = repository.get_ingestion_job(document_id)
+        assert completed_job.status == "completed"
+        assert completed_job.document_id == document.id
         assert (
             session.scalar(
                 select(DocumentChunkModel).where(DocumentChunkModel.document_id == document_id)

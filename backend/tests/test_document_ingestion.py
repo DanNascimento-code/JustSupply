@@ -10,6 +10,8 @@ from justsupply.main import app
 from justsupply.schemas.brand_evidence import EvidenceSourceType, ReviewDecision, ReviewStatus
 from justsupply.schemas.consumer import AssessmentDimension, AssessmentStatus
 from justsupply.schemas.document_ingestion import (
+    DocumentIngestionJobListResponse,
+    DocumentIngestionJobRead,
     DocumentListResponse,
     DocumentMetadata,
     DocumentRead,
@@ -18,6 +20,7 @@ from justsupply.schemas.document_ingestion import (
 
 BRAND_ID = UUID("c65e471a-8e8e-4d89-a493-99d04b56154f")
 DOCUMENT_ID = UUID("ad637cba-4450-4b8f-8798-902a34783bd2")
+JOB_ID = UUID("f9482497-e195-4866-ad3f-3679d83ef7ef")
 FINDING_ID = UUID("355bdf9a-11dc-43bf-b106-a010443a3775")
 
 
@@ -59,6 +62,21 @@ def document_response() -> DocumentRead:
     )
 
 
+def job_response() -> DocumentIngestionJobRead:
+    return DocumentIngestionJobRead(
+        id=JOB_ID,
+        brand_id=BRAND_ID,
+        document_id=None,
+        filename="impact-report.txt",
+        source_title="2025 Impact Report",
+        status="queued",
+        error_message=None,
+        created_at=datetime(2026, 9, 16, 12, 0, tzinfo=UTC),
+        started_at=None,
+        completed_at=None,
+    )
+
+
 class StubDocumentService:
     max_bytes = 1024
 
@@ -66,7 +84,15 @@ class StubDocumentService:
         assert brand_id == BRAND_ID
         return DocumentListResponse(items=[document_response()], total=1)
 
-    def ingest(
+    def list_jobs(self, brand_id: UUID) -> DocumentIngestionJobListResponse:
+        assert brand_id == BRAND_ID
+        return DocumentIngestionJobListResponse(items=[job_response()], total=1)
+
+    def get_job(self, job_id: UUID) -> DocumentIngestionJobRead:
+        assert job_id == JOB_ID
+        return job_response()
+
+    def enqueue(
         self,
         brand_id: UUID,
         metadata: DocumentMetadata,
@@ -74,13 +100,13 @@ class StubDocumentService:
         filename: str,
         content_type: str | None,
         content: bytes,
-    ) -> DocumentRead:
+    ) -> DocumentIngestionJobRead:
         assert brand_id == BRAND_ID
         assert metadata.source_title == "2025 Impact Report"
         assert filename == "impact-report.txt"
         assert content_type == "text/plain"
         assert b"women workers" in content
-        return document_response()
+        return job_response()
 
     def review_finding(
         self,
@@ -111,15 +137,21 @@ def test_document_routes_upload_list_and_review(client: TestClient) -> None:
         files={"file": ("impact-report.txt", document_text, "text/plain")},
     )
     list_response = client.get(f"/api/v1/evidence/brands/{BRAND_ID}/documents")
+    jobs_response = client.get(f"/api/v1/evidence/brands/{BRAND_ID}/ingestion-jobs")
+    job_response_result = client.get(f"/api/v1/evidence/ingestion-jobs/{JOB_ID}")
     review_response = client.patch(
         f"/api/v1/evidence/findings/{FINDING_ID}/review",
         json={"decision": "approved"},
     )
 
-    assert upload_response.status_code == 201
-    assert upload_response.json()["findings"][0]["review_status"] == "pending"
+    assert upload_response.status_code == 202
+    assert upload_response.json()["status"] == "queued"
     assert list_response.status_code == 200
     assert list_response.json()["total"] == 1
+    assert jobs_response.status_code == 200
+    assert jobs_response.json()["items"][0]["id"] == str(JOB_ID)
+    assert job_response_result.status_code == 200
+    assert job_response_result.json()["status"] == "queued"
     assert review_response.status_code == 200
     assert review_response.json()["review_status"] == "approved"
 

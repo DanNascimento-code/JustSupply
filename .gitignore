@@ -24,6 +24,9 @@ postgres-data/
 # Locally ingested evidence documents
 data/uploads/
 
+# Local RAG evaluation reports
+data/evaluation/
+
 # Python packaging
 build/
 dist/
@@ -34,6 +37,8 @@ node_modules/
 
 # Logs
 *.log
+celerybeat-schedule
+*.pid
 
 # Operating system files
 Thumbs.db

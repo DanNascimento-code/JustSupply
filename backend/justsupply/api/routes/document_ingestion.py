@@ -7,21 +7,25 @@ from pydantic import HttpUrl, ValidationError
 
 from justsupply.dependencies import get_document_ingestion_service
 from justsupply.integrations.document_parser import DocumentValidationError
-from justsupply.integrations.openai_extractor import AiExtractionError
 from justsupply.repositories.brand_evidence import BrandNotFoundError
 from justsupply.repositories.document_ingestion import (
+    DocumentIngestionJobNotFoundError,
     DocumentPersistenceError,
     FindingNotFoundError,
 )
 from justsupply.schemas.brand_evidence import EvidenceSourceType
 from justsupply.schemas.document_ingestion import (
+    DocumentIngestionJobListResponse,
+    DocumentIngestionJobRead,
     DocumentListResponse,
     DocumentMetadata,
-    DocumentRead,
     ExtractedFindingRead,
     FindingReviewUpdate,
 )
-from justsupply.services.document_ingestion import DocumentIngestionService
+from justsupply.services.document_ingestion import (
+    DocumentIngestionService,
+    DocumentJobDispatchError,
+)
 
 router = APIRouter(prefix="/evidence", tags=["evidence documents"])
 DocumentServiceDependency = Annotated[
@@ -43,8 +47,8 @@ def list_documents(
 
 @router.post(
     "/brands/{brand_id}/documents",
-    response_model=DocumentRead,
-    status_code=status.HTTP_201_CREATED,
+    response_model=DocumentIngestionJobRead,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 async def ingest_document(
     brand_id: UUID,
@@ -55,7 +59,7 @@ async def ingest_document(
     source_url: Annotated[HttpUrl, Form()],
     source_type: Annotated[EvidenceSourceType, Form()],
     published_at: Annotated[datetime | None, Form()] = None,
-) -> DocumentRead:
+) -> DocumentIngestionJobRead:
     content = await file.read(service.max_bytes + 1)
     try:
         metadata = DocumentMetadata(
@@ -65,7 +69,7 @@ async def ingest_document(
             source_type=source_type,
             published_at=published_at,
         )
-        return service.ingest(
+        return service.enqueue(
             brand_id,
             metadata,
             filename=file.filename or "",
@@ -79,7 +83,7 @@ async def ingest_document(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(error),
         ) from error
-    except AiExtractionError as error:
+    except DocumentJobDispatchError as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(error),
@@ -91,6 +95,34 @@ async def ingest_document(
         ) from error
     finally:
         await file.close()
+
+
+@router.get(
+    "/brands/{brand_id}/ingestion-jobs",
+    response_model=DocumentIngestionJobListResponse,
+)
+def list_ingestion_jobs(
+    brand_id: UUID,
+    service: DocumentServiceDependency,
+) -> DocumentIngestionJobListResponse:
+    try:
+        return service.list_jobs(brand_id)
+    except BrandNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+
+
+@router.get(
+    "/ingestion-jobs/{job_id}",
+    response_model=DocumentIngestionJobRead,
+)
+def get_ingestion_job(
+    job_id: UUID,
+    service: DocumentServiceDependency,
+) -> DocumentIngestionJobRead:
+    try:
+        return service.get_job(job_id)
+    except DocumentIngestionJobNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
 
 
 @router.patch("/findings/{finding_id}/review", response_model=ExtractedFindingRead)

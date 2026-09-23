@@ -86,6 +86,8 @@ class StubRagService:
             case_count=1,
             hit_rate=1.0,
             mean_reciprocal_rank=1.0,
+            mean_precision=1.0,
+            mean_recall=1.0,
             cases=[],
         )
 
@@ -149,6 +151,10 @@ def test_retrieval_metrics_report_hit_rate_and_mrr() -> None:
     assert miss.hit is False
     assert aggregate.hit_rate == 0.5
     assert aggregate.mean_reciprocal_rank == 0.25
+    assert hit.precision == 0.5
+    assert hit.recall == 1.0
+    assert aggregate.mean_precision == 0.25
+    assert aggregate.mean_recall == 0.5
 
 
 def test_rag_service_discards_citations_outside_retrieved_context() -> None:

@@ -91,6 +91,8 @@ class SqlAlchemyRagRepository:
         brand_id: UUID,
         query_embedding: list[float],
         *,
+        embedding_model: str,
+        embedding_dimensions: int,
         top_k: int,
     ) -> list[RetrievedChunk]:
         self.get_brand_name(brand_id)
@@ -101,7 +103,11 @@ class SqlAlchemyRagRepository:
                 SourceDocumentModel,
                 SourceDocumentModel.id == DocumentChunkModel.document_id,
             )
-            .where(SourceDocumentModel.brand_id == brand_id)
+            .where(
+                SourceDocumentModel.brand_id == brand_id,
+                DocumentChunkModel.embedding_model == embedding_model,
+                DocumentChunkModel.embedding_dimensions == embedding_dimensions,
+            )
             .order_by(distance)
             .limit(top_k)
         ).all()

@@ -98,6 +98,8 @@ def test_pgvector_retrieval_returns_the_nearest_brand_chunk() -> None:
         results = SqlAlchemyRagRepository(session).search(
             brand_id,
             relevant_embedding,
+            embedding_model="test-model",
+            embedding_dimensions=1536,
             top_k=2,
         )
 

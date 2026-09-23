@@ -15,6 +15,7 @@ from justsupply.database.models import (
     ClaimEvidenceRecordModel,
     ClaimModel,
     DocumentChunkModel,
+    DocumentIngestionJobModel,
     EvidenceRecordModel,
     EvidenceSourceModel,
     SourceDocumentModel,
@@ -29,6 +30,8 @@ from justsupply.schemas.brand_evidence import (
 from justsupply.schemas.consumer import AssessmentDimension, AssessmentStatus
 from justsupply.schemas.document_ingestion import (
     AiExtractionFinding,
+    DocumentIngestionJobListResponse,
+    DocumentIngestionJobRead,
     DocumentListResponse,
     DocumentRead,
     ExtractedFindingRead,
@@ -42,6 +45,11 @@ class FindingNotFoundError(Exception):
 
 class DocumentPersistenceError(RuntimeError):
     pass
+
+
+class DocumentIngestionJobNotFoundError(Exception):
+    def __init__(self, job_id: UUID) -> None:
+        super().__init__(f"Document ingestion job '{job_id}' was not found.")
 
 
 @dataclass(frozen=True)
@@ -66,6 +74,40 @@ class DocumentCreate:
     chunks: list[IndexedChunk]
     embedding_model: str
     embedding_dimensions: int
+
+
+@dataclass(frozen=True)
+class DocumentIngestionJobCreate:
+    id: UUID
+    brand_id: UUID
+    document_id: UUID | None
+    filename: str
+    media_type: str
+    byte_size: int
+    content_sha256: str
+    storage_path: str
+    source_title: str
+    source_provider: str
+    source_url: str
+    source_type: EvidenceSourceType
+    published_at: datetime | None
+    status: Literal["queued", "completed"]
+
+
+@dataclass(frozen=True)
+class DocumentIngestionJobWorkItem:
+    id: UUID
+    brand_id: UUID
+    filename: str
+    media_type: str
+    byte_size: int
+    content_sha256: str
+    storage_path: str
+    source_title: str
+    source_provider: str
+    source_url: str
+    source_type: EvidenceSourceType
+    published_at: datetime | None
 
 
 class SqlAlchemyDocumentRepository:
@@ -96,6 +138,101 @@ class SqlAlchemyDocumentRepository:
         ).all()
         items = [self._to_read(document, brand) for document in documents]
         return DocumentListResponse(items=items, total=len(items))
+
+    def create_ingestion_job(
+        self,
+        payload: DocumentIngestionJobCreate,
+    ) -> DocumentIngestionJobRead:
+        self._get_brand(payload.brand_id)
+        now = datetime.now(UTC)
+        job = DocumentIngestionJobModel(
+            id=payload.id,
+            brand_id=payload.brand_id,
+            document_id=payload.document_id,
+            filename=payload.filename,
+            media_type=payload.media_type,
+            byte_size=payload.byte_size,
+            content_sha256=payload.content_sha256,
+            storage_path=payload.storage_path,
+            source_title=payload.source_title,
+            source_provider=payload.source_provider,
+            source_url=payload.source_url,
+            source_type=payload.source_type.value,
+            published_at=payload.published_at,
+            status=payload.status,
+            error_message=None,
+            created_at=now,
+            started_at=None,
+            completed_at=now if payload.status == "completed" else None,
+        )
+        self._session.add(job)
+        self._commit_job_change("The document ingestion job could not be created.")
+        return self._job_to_read(job)
+
+    def get_ingestion_job(self, job_id: UUID) -> DocumentIngestionJobRead:
+        return self._job_to_read(self._get_job(job_id))
+
+    def list_ingestion_jobs(self, brand_id: UUID) -> DocumentIngestionJobListResponse:
+        self._get_brand(brand_id)
+        jobs = self._session.scalars(
+            select(DocumentIngestionJobModel)
+            .where(DocumentIngestionJobModel.brand_id == brand_id)
+            .order_by(DocumentIngestionJobModel.created_at.desc())
+            .limit(20)
+        ).all()
+        return DocumentIngestionJobListResponse(
+            items=[self._job_to_read(job) for job in jobs],
+            total=len(jobs),
+        )
+
+    def start_ingestion_job(self, job_id: UUID) -> DocumentIngestionJobWorkItem | None:
+        job = self._get_job(job_id)
+        if job.status == "completed":
+            return None
+        if job.status == "failed":
+            raise DocumentPersistenceError("A failed ingestion job cannot be processed again.")
+        job.status = "processing"
+        job.started_at = datetime.now(UTC)
+        job.completed_at = None
+        job.error_message = None
+        self._commit_job_change("The document ingestion job could not be started.")
+        return DocumentIngestionJobWorkItem(
+            id=job.id,
+            brand_id=job.brand_id,
+            filename=job.filename,
+            media_type=job.media_type,
+            byte_size=job.byte_size,
+            content_sha256=job.content_sha256,
+            storage_path=job.storage_path,
+            source_title=job.source_title,
+            source_provider=job.source_provider,
+            source_url=job.source_url,
+            source_type=EvidenceSourceType(job.source_type),
+            published_at=job.published_at,
+        )
+
+    def mark_ingestion_job_queued(self, job_id: UUID, message: str) -> None:
+        job = self._get_job(job_id)
+        job.status = "queued"
+        job.error_message = message[:2000]
+        job.started_at = None
+        job.completed_at = None
+        self._commit_job_change("The document ingestion retry could not be saved.")
+
+    def mark_ingestion_job_completed(self, job_id: UUID, document_id: UUID) -> None:
+        job = self._get_job(job_id)
+        job.status = "completed"
+        job.document_id = document_id
+        job.error_message = None
+        job.completed_at = datetime.now(UTC)
+        self._commit_job_change("The completed ingestion job could not be saved.")
+
+    def mark_ingestion_job_failed(self, job_id: UUID, message: str) -> None:
+        job = self._get_job(job_id)
+        job.status = "failed"
+        job.error_message = message[:2000]
+        job.completed_at = datetime.now(UTC)
+        self._commit_job_change("The failed ingestion job could not be saved.")
 
     def create_document(self, payload: DocumentCreate) -> DocumentRead:
         brand = self._get_brand(payload.brand_id)
@@ -303,6 +440,19 @@ class SqlAlchemyDocumentRepository:
             raise BrandNotFoundError(brand_id)
         return brand
 
+    def _get_job(self, job_id: UUID) -> DocumentIngestionJobModel:
+        job = self._session.get(DocumentIngestionJobModel, job_id)
+        if job is None:
+            raise DocumentIngestionJobNotFoundError(job_id)
+        return job
+
+    def _commit_job_change(self, error_message: str) -> None:
+        try:
+            self._session.commit()
+        except IntegrityError as error:
+            self._session.rollback()
+            raise DocumentPersistenceError(error_message) from error
+
     def _to_read(self, document: SourceDocumentModel, brand: BrandModel) -> DocumentRead:
         extraction = self._session.scalar(
             select(AiExtractionRunModel)
@@ -341,6 +491,24 @@ class SqlAlchemyDocumentRepository:
             chunk_count=chunk_count or 0,
             created_at=document.created_at,
             findings=[self._finding_to_read(finding) for finding in findings],
+        )
+
+    @staticmethod
+    def _job_to_read(job: DocumentIngestionJobModel) -> DocumentIngestionJobRead:
+        return DocumentIngestionJobRead(
+            id=job.id,
+            brand_id=job.brand_id,
+            document_id=job.document_id,
+            filename=job.filename,
+            source_title=job.source_title,
+            status=cast(
+                Literal["queued", "processing", "completed", "failed"],
+                job.status,
+            ),
+            error_message=job.error_message,
+            created_at=job.created_at,
+            started_at=job.started_at,
+            completed_at=job.completed_at,
         )
 
     @staticmethod

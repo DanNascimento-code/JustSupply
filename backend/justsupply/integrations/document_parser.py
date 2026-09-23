@@ -17,6 +17,12 @@ class ParsedDocument:
     text: str
 
 
+@dataclass(frozen=True)
+class ValidatedDocumentUpload:
+    filename: str
+    media_type: str
+
+
 ALLOWED_MEDIA_TYPES = {
     ".md": "text/markdown",
     ".pdf": "application/pdf",
@@ -32,6 +38,39 @@ def parse_document(
     max_bytes: int,
     max_characters: int,
 ) -> ParsedDocument:
+    validated = validate_document_upload(
+        filename,
+        content_type,
+        content,
+        max_bytes=max_bytes,
+    )
+    suffix = Path(validated.filename).suffix.lower()
+
+    text = _extract_pdf_text(content) if suffix == ".pdf" else _decode_text(content)
+    normalized_text = text.strip()
+    if len(normalized_text) < 40:
+        raise DocumentValidationError(
+            "The document does not contain enough readable text. Scanned PDFs need OCR first."
+        )
+    if len(normalized_text) > max_characters:
+        raise DocumentValidationError(
+            "The extracted text is too long for this MVP. Upload a shorter document."
+        )
+
+    return ParsedDocument(
+        filename=validated.filename,
+        media_type=validated.media_type,
+        text=normalized_text,
+    )
+
+
+def validate_document_upload(
+    filename: str,
+    content_type: str | None,
+    content: bytes,
+    *,
+    max_bytes: int,
+) -> ValidatedDocumentUpload:
     safe_filename = Path(filename).name.strip()
     suffix = Path(safe_filename).suffix.lower()
     expected_media_type = ALLOWED_MEDIA_TYPES.get(suffix)
@@ -46,21 +85,9 @@ def parse_document(
     if content_type not in {None, "", expected_media_type, "application/octet-stream"}:
         raise DocumentValidationError("The file content type does not match its extension.")
 
-    text = _extract_pdf_text(content) if suffix == ".pdf" else _decode_text(content)
-    normalized_text = text.strip()
-    if len(normalized_text) < 40:
-        raise DocumentValidationError(
-            "The document does not contain enough readable text. Scanned PDFs need OCR first."
-        )
-    if len(normalized_text) > max_characters:
-        raise DocumentValidationError(
-            "The extracted text is too long for this MVP. Upload a shorter document."
-        )
-
-    return ParsedDocument(
+    return ValidatedDocumentUpload(
         filename=safe_filename,
         media_type=expected_media_type,
-        text=normalized_text,
     )
 
 

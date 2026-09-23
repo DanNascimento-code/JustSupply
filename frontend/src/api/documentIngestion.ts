@@ -1,5 +1,6 @@
 import type {
-  EvidenceDocument,
+  DocumentIngestionJob,
+  DocumentIngestionJobListResponse,
   EvidenceDocumentInput,
   EvidenceDocumentListResponse,
   ExtractedFinding,
@@ -18,7 +19,7 @@ export function listEvidenceDocuments(
 export function ingestEvidenceDocument(
   brandId: string,
   input: EvidenceDocumentInput,
-): Promise<EvidenceDocument> {
+): Promise<DocumentIngestionJob> {
   const formData = new FormData()
   formData.append('file', input.file)
   formData.append('source_title', input.sourceTitle)
@@ -28,9 +29,17 @@ export function ingestEvidenceDocument(
   if (input.publishedAt) {
     formData.append('published_at', `${input.publishedAt}T00:00:00Z`)
   }
-  return apiRequest<EvidenceDocument>(
+  return apiRequest<DocumentIngestionJob>(
     `/api/v1/evidence/brands/${brandId}/documents`,
     { method: 'POST', body: formData },
+  )
+}
+
+export function listDocumentIngestionJobs(
+  brandId: string,
+): Promise<DocumentIngestionJobListResponse> {
+  return apiRequest<DocumentIngestionJobListResponse>(
+    `/api/v1/evidence/brands/${brandId}/ingestion-jobs`,
   )
 }
 

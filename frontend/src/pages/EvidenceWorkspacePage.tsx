@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   createBrandClaim,
@@ -8,6 +8,7 @@ import {
 } from '../api/brandEvidence'
 import {
   ingestEvidenceDocument,
+  listDocumentIngestionJobs,
   listEvidenceDocuments,
   reviewExtractedFinding,
 } from '../api/documentIngestion'
@@ -50,6 +51,31 @@ export function EvidenceWorkspacePage() {
     queryFn: () => listEvidenceDocuments(selectedBrandId),
     enabled: selectedBrandId.length > 0,
   })
+  const jobsQueryKey = ['document-ingestion-jobs', selectedBrandId] as const
+  const jobsQuery = useQuery({
+    queryKey: jobsQueryKey,
+    queryFn: () => listDocumentIngestionJobs(selectedBrandId),
+    enabled: selectedBrandId.length > 0,
+    refetchInterval: (query) =>
+      query.state.data?.items.some(
+        (job) => job.status === 'queued' || job.status === 'processing',
+      )
+        ? 2000
+        : false,
+  })
+  const completedJobIds = (jobsQuery.data?.items ?? [])
+    .filter((job) => job.status === 'completed')
+    .map((job) => job.id)
+    .sort()
+    .join(',')
+
+  useEffect(() => {
+    if (completedJobIds) {
+      void queryClient.invalidateQueries({
+        queryKey: ['evidence-documents', selectedBrandId],
+      })
+    }
+  }, [completedJobIds, queryClient, selectedBrandId])
   const createMutation = useMutation({
     mutationFn: ({
       brandId,
@@ -78,7 +104,7 @@ export function EvidenceWorkspacePage() {
     mutationFn: (input: EvidenceDocumentInput) =>
       ingestEvidenceDocument(selectedBrandId, input),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: documentsQueryKey })
+      await queryClient.invalidateQueries({ queryKey: jobsQueryKey })
     },
   })
   const ragMutation = useMutation({
@@ -172,6 +198,7 @@ export function EvidenceWorkspacePage() {
             brands={brands}
             selectedBrandId={selectedBrandId}
             documents={documentsQuery.data?.items ?? []}
+            jobs={jobsQuery.data?.items ?? []}
             isLoading={documentsQuery.isPending}
             isUploading={documentMutation.isPending}
             reviewingFindingId={
@@ -183,6 +210,7 @@ export function EvidenceWorkspacePage() {
               indexMutation.isPending ? indexMutation.variables : undefined
             }
             uploadError={documentMutation.error}
+            jobError={jobsQuery.error}
             reviewError={findingReviewMutation.error ?? documentsQuery.error}
             onBrandChange={handleBrandChange}
             onUpload={handleDocumentUpload}

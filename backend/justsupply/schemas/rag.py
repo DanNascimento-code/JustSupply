@@ -11,7 +11,7 @@ RagQuestion = Annotated[
 
 class RagQuestionRequest(BaseModel):
     question: RagQuestion
-    top_k: int = Field(default=5, ge=1, le=8)
+    top_k: int = Field(default=3, ge=1, le=8)
 
 
 class RagCitation(BaseModel):
@@ -50,7 +50,7 @@ class RetrievalEvaluationCaseInput(BaseModel):
 
 class RetrievalEvaluationRequest(BaseModel):
     cases: list[RetrievalEvaluationCaseInput] = Field(min_length=1, max_length=20)
-    top_k: int = Field(default=5, ge=1, le=8)
+    top_k: int = Field(default=3, ge=1, le=8)
 
 
 class RetrievalEvaluationCaseResult(BaseModel):
@@ -59,6 +59,8 @@ class RetrievalEvaluationCaseResult(BaseModel):
     first_relevant_rank: int | None
     hit: bool
     reciprocal_rank: float
+    precision: float
+    recall: float
 
 
 class RetrievalEvaluationResponse(BaseModel):
@@ -66,6 +68,8 @@ class RetrievalEvaluationResponse(BaseModel):
     case_count: int
     hit_rate: float
     mean_reciprocal_rank: float
+    mean_precision: float
+    mean_recall: float
     cases: list[RetrievalEvaluationCaseResult]
 
 

@@ -7,7 +7,7 @@ export function askBrandEvidence(
 ): Promise<RagAnswer> {
   return apiRequest<RagAnswer>(`/api/v1/rag/brands/${brandId}/ask`, {
     method: 'POST',
-    body: JSON.stringify({ question, top_k: 5 }),
+    body: JSON.stringify({ question, top_k: 3 }),
   })
 }
 

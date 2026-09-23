@@ -11,6 +11,7 @@ DocumentText = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=3, max_length=5000),
 ]
+DocumentIngestionStatus = Literal["queued", "processing", "completed", "failed"]
 
 
 class DocumentMetadata(BaseModel):
@@ -87,6 +88,24 @@ class DocumentRead(BaseModel):
 
 class DocumentListResponse(BaseModel):
     items: list[DocumentRead]
+    total: int
+
+
+class DocumentIngestionJobRead(BaseModel):
+    id: UUID
+    brand_id: UUID
+    document_id: UUID | None
+    filename: str
+    source_title: str
+    status: DocumentIngestionStatus
+    error_message: str | None
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+
+
+class DocumentIngestionJobListResponse(BaseModel):
+    items: list[DocumentIngestionJobRead]
     total: int
 
 

@@ -1424,6 +1424,94 @@ footer span:first-child {
   line-height: 1.45;
 }
 
+.ingestion-job-list {
+  display: grid;
+  gap: 9px;
+  padding-top: 18px;
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.ingestion-job-heading,
+.ingestion-job {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ingestion-job-heading {
+  font-size: 0.72rem;
+}
+
+.ingestion-job-heading span,
+.ingestion-job-empty,
+.ingestion-job small {
+  color: var(--muted);
+  font-size: 0.66rem;
+}
+
+.ingestion-job-empty {
+  margin: 0;
+}
+
+.ingestion-job {
+  flex-wrap: wrap;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f7f7f1;
+}
+
+.ingestion-job > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ingestion-job > div strong {
+  overflow: hidden;
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ingestion-job > p {
+  flex-basis: 100%;
+  margin: 0;
+  color: #9f3f35;
+  font-size: 0.65rem;
+  line-height: 1.4;
+}
+
+.job-status {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #e7e9e4;
+  color: var(--muted);
+  font-size: 0.59rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.job-status-processing,
+.job-status-queued {
+  background: #f5e9bd;
+  color: #755f19;
+}
+
+.job-status-completed {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.job-status-failed {
+  background: #f3dedb;
+  color: #8c3028;
+}
+
 .document-review-column {
   min-width: 0;
 }

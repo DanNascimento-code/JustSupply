@@ -46,6 +46,30 @@ export interface EvidenceDocumentListResponse {
   total: number
 }
 
+export type DocumentIngestionStatus =
+  | 'queued'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+
+export interface DocumentIngestionJob {
+  id: string
+  brand_id: string
+  document_id: string | null
+  filename: string
+  source_title: string
+  status: DocumentIngestionStatus
+  error_message: string | null
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+}
+
+export interface DocumentIngestionJobListResponse {
+  items: DocumentIngestionJob[]
+  total: number
+}
+
 export interface EvidenceDocumentInput {
   file: File
   sourceTitle: string

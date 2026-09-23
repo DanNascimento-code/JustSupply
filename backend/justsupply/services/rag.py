@@ -26,7 +26,10 @@ class EmbeddingProvider(Protocol):
     model_name: str
     dimensions: int
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        pass
+
+    def embed_query(self, text: str) -> list[float]:
         pass
 
 
@@ -84,7 +87,7 @@ class RagIndexingService:
         )
         if not chunks:
             return []
-        embeddings = self._embedding_provider.embed([chunk.text for chunk in chunks])
+        embeddings = self._embedding_provider.embed_documents([chunk.text for chunk in chunks])
         if len(embeddings) != len(chunks):
             raise RagProviderError("The embedding service returned an unexpected result count.")
         return [
@@ -113,8 +116,14 @@ class RagRetriever:
         *,
         top_k: int,
     ) -> list[RetrievedChunk]:
-        embedding = self._embedding_provider.embed([question])[0]
-        return self._repository.search(brand_id, embedding, top_k=top_k)
+        embedding = self._embedding_provider.embed_query(question)
+        return self._repository.search(
+            brand_id,
+            embedding,
+            embedding_model=self._embedding_provider.model_name,
+            embedding_dimensions=self._embedding_provider.dimensions,
+            top_k=top_k,
+        )
 
 
 class RagService:
@@ -203,6 +212,8 @@ class RagService:
                     first_relevant_rank=case_metrics.first_relevant_rank,
                     hit=case_metrics.hit,
                     reciprocal_rank=case_metrics.reciprocal_rank,
+                    precision=case_metrics.precision,
+                    recall=case_metrics.recall,
                 )
             )
         aggregate = aggregate_retrieval_metrics(metrics)
@@ -211,6 +222,8 @@ class RagService:
             case_count=len(results),
             hit_rate=aggregate.hit_rate,
             mean_reciprocal_rank=aggregate.mean_reciprocal_rank,
+            mean_precision=aggregate.mean_precision,
+            mean_recall=aggregate.mean_recall,
             cases=results,
         )
 

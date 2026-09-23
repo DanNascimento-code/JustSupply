@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import type { BrandSummary, EvidenceSourceType } from '../types/brandEvidence'
 import type {
+  DocumentIngestionJob,
   EvidenceDocument,
   EvidenceDocumentInput,
   FindingReviewDecision,
@@ -10,11 +11,13 @@ interface DocumentIngestionWorkspaceProps {
   brands: BrandSummary[]
   selectedBrandId: string
   documents: EvidenceDocument[]
+  jobs: DocumentIngestionJob[]
   isLoading: boolean
   isUploading: boolean
   reviewingFindingId?: string
   indexingDocumentId?: string
   uploadError: Error | null
+  jobError: Error | null
   reviewError: Error | null
   onBrandChange: (brandId: string) => void
   onUpload: (input: EvidenceDocumentInput) => Promise<void>
@@ -43,15 +46,24 @@ const dimensionLabels = {
   minority_inclusion: 'Minority inclusion',
 }
 
+const jobStatusLabels = {
+  queued: 'Queued',
+  processing: 'Processing',
+  completed: 'Completed',
+  failed: 'Failed',
+}
+
 export function DocumentIngestionWorkspace({
   brands,
   selectedBrandId,
   documents,
+  jobs,
   isLoading,
   isUploading,
   reviewingFindingId,
   indexingDocumentId,
   uploadError,
+  jobError,
   reviewError,
   onBrandChange,
   onUpload,
@@ -198,12 +210,36 @@ export function DocumentIngestionWorkspace({
           {formError ? <p className="form-error">{formError}</p> : null}
           {uploadError ? <p className="form-error">{uploadError.message}</p> : null}
           <button className="primary-button" type="submit" disabled={isUploading}>
-            {isUploading ? 'Extracting evidence…' : 'Upload and extract with AI'}
+            {isUploading ? 'Adding to queue…' : 'Upload and process with AI'}
             <span aria-hidden="true">→</span>
           </button>
           <p className="ai-privacy-note">
-            The document text is sent to the configured OpenAI model for extraction.
+            The worker sends document text to the configured Gemini model for extraction.
           </p>
+
+          <div className="ingestion-job-list" aria-label="Document processing queue">
+            <div className="ingestion-job-heading">
+              <strong>Processing queue</strong>
+              <span>{jobs.length} recent</span>
+            </div>
+            {jobError ? <p className="form-error">{jobError.message}</p> : null}
+            {jobs.length === 0 ? (
+              <p className="ingestion-job-empty">No uploads in the queue yet.</p>
+            ) : (
+              jobs.map((job) => (
+                <div className="ingestion-job" key={job.id}>
+                  <div>
+                    <strong>{job.filename}</strong>
+                    <small>{job.source_title}</small>
+                  </div>
+                  <span className={`job-status job-status-${job.status}`}>
+                    {jobStatusLabels[job.status]}
+                  </span>
+                  {job.error_message ? <p>{job.error_message}</p> : null}
+                </div>
+              ))
+            )}
+          </div>
         </form>
 
         <div className="document-review-column">
