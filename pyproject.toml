@@ -5,22 +5,18 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "justsupply"
 version = "0.1.0"
-description = "Evidence-based supply-chain due diligence platform."
+description = "Consumer product search with cited ethical and environmental evidence."
 readme = "README.md"
 requires-python = ">=3.14,<3.15"
 dependencies = [
     "alembic==1.20.0",
-    "celery[redis]==5.6.3",
     "fastapi==0.141.1",
     "google-genai==2.25.0",
     "httpx2>=2.12,<3",
     "langchain-core==1.6.3",
-    "openai==3.14.1",
     "pgvector==0.5.0",
     "psycopg[binary]==3.3.5",
     "pydantic-settings==2.15.0",
-    "pypdf==6.19.0",
-    "python-multipart==0.0.32",
     "sqlalchemy==2.0.52",
     "uvicorn[standard]==0.52.4",
 ]

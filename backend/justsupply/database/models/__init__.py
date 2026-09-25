@@ -1,11 +1,5 @@
-from justsupply.database.models.document import (
-    AiExtractionRunModel,
-    AiFindingModel,
-    DocumentChunkModel,
-    DocumentIngestionJobModel,
-    SourceDocumentModel,
-)
 from justsupply.database.models.evidence import (
+    AiResearchRunModel,
     BrandModel,
     ClaimEvidenceRecordModel,
     ClaimModel,
@@ -13,19 +7,13 @@ from justsupply.database.models.evidence import (
     EvidenceSourceModel,
     ProductModel,
 )
-from justsupply.database.models.supplier import SupplierModel
 
 __all__ = [
-    "AiExtractionRunModel",
-    "AiFindingModel",
+    "AiResearchRunModel",
     "BrandModel",
     "ClaimEvidenceRecordModel",
     "ClaimModel",
-    "DocumentChunkModel",
-    "DocumentIngestionJobModel",
     "EvidenceRecordModel",
     "EvidenceSourceModel",
     "ProductModel",
-    "SourceDocumentModel",
-    "SupplierModel",
 ]

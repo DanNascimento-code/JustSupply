@@ -21,11 +21,8 @@ htmlcov/
 # Database data
 postgres-data/
 
-# Locally ingested evidence documents
-data/uploads/
-
-# Local RAG evaluation reports
-data/evaluation/
+# Local runtime data from earlier or experimental runs
+data/
 
 # Python packaging
 build/
@@ -37,8 +34,6 @@ node_modules/
 
 # Logs
 *.log
-celerybeat-schedule
-*.pid
 
 # Operating system files
 Thumbs.db

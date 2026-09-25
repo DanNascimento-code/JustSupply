@@ -12,7 +12,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
-target_metadata = models.SupplierModel.metadata
+target_metadata = models.ProductModel.metadata
 
 
 def run_migrations_offline() -> None:

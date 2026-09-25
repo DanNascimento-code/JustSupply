@@ -1,45 +1,67 @@
 import {
   BrowserRouter,
   Link,
-  NavLink,
   Navigate,
   Route,
   Routes,
 } from 'react-router-dom'
 import { ConsumerSearchPage } from './pages/ConsumerSearchPage'
-import { EvidenceWorkspacePage } from './pages/EvidenceWorkspacePage'
-import { SupplierWorkspacePage } from './pages/SupplierWorkspacePage'
+import { I18nProvider, useI18n, type Language } from './i18n'
 
-function App() {
+const languages: { code: Language; label: string }[] = [
+  { code: 'en', label: 'EN' },
+  { code: 'pt-BR', label: 'PT-BR' },
+  { code: 'es-419', label: 'ES-LATAM' },
+]
+
+function AppContent() {
+  const { language, setLanguage, t } = useI18n()
   return (
     <BrowserRouter>
       <div className="app-shell">
         <header className="site-header">
-          <Link className="brand" to="/" aria-label="JustSupply home">
+          <Link className="brand" to="/" aria-label={t('home')}>
             <span className="brand-mark" aria-hidden="true">JS</span>
             <span>JustSupply</span>
           </Link>
 
-          <nav className="top-navigation" aria-label="Primary navigation">
-            <NavLink to="/" end>Consumer</NavLink>
-            <NavLink to="/pro/evidence">Evidence review</NavLink>
-            <NavLink to="/pro/suppliers">Suppliers</NavLink>
-          </nav>
+          <div className="header-tools">
+            <span className="environment-badge">{t('appBadge')}</span>
+            <div className="language-switcher" role="group" aria-label={t('languageLabel')}>
+              {languages.map(({ code, label }) => (
+                <button
+                  type="button"
+                  key={code}
+                  className={language === code ? 'active' : ''}
+                  aria-pressed={language === code}
+                  onClick={() => setLanguage(code)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
         </header>
 
         <Routes>
           <Route path="/" element={<ConsumerSearchPage />} />
-          <Route path="/pro/evidence" element={<EvidenceWorkspacePage />} />
-          <Route path="/pro/suppliers" element={<SupplierWorkspacePage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
 
         <footer>
           <span>JustSupply</span>
-          <span>Evidence before conclusions.</span>
+          <span>{t('footerTagline')}</span>
         </footer>
       </div>
     </BrowserRouter>
+  )
+}
+
+function App() {
+  return (
+    <I18nProvider>
+      <AppContent />
+    </I18nProvider>
   )
 }
 
