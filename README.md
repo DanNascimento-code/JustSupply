@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="frontend/public/justsupply-logo-no-check.png" alt="JustSupply logo" width="150" />
+</p>
+
 # JustSupply
 
 **An evidence-first product research platform for ethical purchasing decisions.**

@@ -102,7 +102,12 @@ export function ConsumerProductCard({ product: initialProduct }: ConsumerProduct
               loading="lazy"
             />
           ) : (
-            <span aria-hidden="true">JS</span>
+            <img
+              className="product-placeholder-logo"
+              src="/justsupply-logo-no-check-256.png"
+              alt=""
+              aria-hidden="true"
+            />
           )}
         </div>
 

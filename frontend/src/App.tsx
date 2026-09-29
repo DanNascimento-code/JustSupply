@@ -22,7 +22,12 @@ function AppContent() {
       <div className="app-shell">
         <header className="site-header">
           <Link className="brand" to="/" aria-label={t('home')}>
-            <span className="brand-mark" aria-hidden="true">JS</span>
+            <img
+              className="brand-mark"
+              src="/justsupply-logo-no-check-256.png"
+              alt=""
+              aria-hidden="true"
+            />
             <span>JustSupply</span>
           </Link>
 

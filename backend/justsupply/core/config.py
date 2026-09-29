@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AliasChoices, Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,7 +13,10 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    database_url: str = "postgresql+psycopg://justsupply:justsupply@localhost:5433/justsupply"
+    database_url: str = Field(
+        default="postgresql+psycopg://justsupply:justsupply@localhost:5433/justsupply",
+        validation_alias=AliasChoices("JUSTSUPPLY_DATABASE_URL", "DATABASE_URL"),
+    )
     cors_origins: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
@@ -49,6 +52,13 @@ class Settings(BaseSettings):
     wikidata_timeout_seconds: float = 10.0
     ai_research_ttl_days: int = 7
     catalog_cache_ttl_hours: int = 24
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def use_psycopg_driver(cls, value: object) -> object:
+        if isinstance(value, str) and value.startswith("postgresql://"):
+            return value.replace("postgresql://", "postgresql+psycopg://", 1)
+        return value
 
 
 @lru_cache
