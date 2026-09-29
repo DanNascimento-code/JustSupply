@@ -26,9 +26,6 @@ used to organize and explain evidence—not to replace it.
 | English, Portuguese, and Spanish | Persisted localized findings and locale-aware UI |
 | Explicit uncertainty and provenance | Server-side citation and trust validation |
 
-This portfolio project demonstrates full-stack software engineering with a particular focus on AI
-engineering, retrieval-augmented generation, resilient external integrations, data provenance, and
-responsible product design.
 
 ## The problem
 
