@@ -1,7 +1,10 @@
 import type {
   ConsumerAnswer,
+  CommunityReport,
   ConsumerSearchResponse,
   ProductResearchResponse,
+  PublicCommunityReportList,
+  FoodCategory,
 } from '../types/consumer'
 import type { Language } from '../i18n'
 import { apiRequest } from './client'
@@ -16,6 +19,32 @@ export function searchConsumerProducts(
   )
 }
 
+export function listCommunityReports(
+  language: Language,
+  barcode?: string,
+  productName?: string,
+  category?: FoodCategory,
+): Promise<PublicCommunityReportList> {
+  const searchParams = new URLSearchParams({ language })
+  if (barcode) searchParams.set('barcode', barcode)
+  if (productName) searchParams.set('product_name', productName)
+  if (category) searchParams.set('category', category)
+  return apiRequest<PublicCommunityReportList>(
+    `/api/v1/consumer/reports?${searchParams.toString()}`,
+  )
+}
+
+export function submitCommunityReport(
+  form: FormData,
+  language: Language,
+): Promise<CommunityReport> {
+  const searchParams = new URLSearchParams({ language })
+  return apiRequest<CommunityReport>(
+    `/api/v1/consumer/reports?${searchParams.toString()}`,
+    { method: 'POST', body: form },
+  )
+}
+
 export function researchConsumerProduct(
   barcode: string,
   language: Language,
@@ -25,6 +54,20 @@ export function researchConsumerProduct(
   return apiRequest<ProductResearchResponse>(
     `/api/v1/consumer/products/${barcode}/research?${searchParams.toString()}`,
     { method: 'POST' },
+  )
+}
+
+export function researchConsumerLabel(
+  barcode: string,
+  image: File,
+  language: Language,
+): Promise<ProductResearchResponse> {
+  const form = new FormData()
+  form.append('image', image)
+  const searchParams = new URLSearchParams({ language })
+  return apiRequest<ProductResearchResponse>(
+    `/api/v1/consumer/products/${barcode}/research-label?${searchParams.toString()}`,
+    { method: 'POST', body: form },
   )
 }
 

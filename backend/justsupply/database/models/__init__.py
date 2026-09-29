@@ -1,19 +1,31 @@
 from justsupply.database.models.evidence import (
     AiResearchRunModel,
     BrandModel,
+    CatalogSearchCacheModel,
     ClaimEvidenceRecordModel,
     ClaimModel,
+    CommunityReportAssessmentModel,
+    CommunityReportAttachmentModel,
+    CommunityReportModel,
+    ConsumerAnswerCacheModel,
     EvidenceRecordModel,
     EvidenceSourceModel,
+    ProductLabelImageModel,
     ProductModel,
 )
 
 __all__ = [
     "AiResearchRunModel",
     "BrandModel",
+    "CatalogSearchCacheModel",
     "ClaimEvidenceRecordModel",
     "ClaimModel",
+    "CommunityReportAssessmentModel",
+    "CommunityReportAttachmentModel",
+    "CommunityReportModel",
+    "ConsumerAnswerCacheModel",
     "EvidenceRecordModel",
     "EvidenceSourceModel",
+    "ProductLabelImageModel",
     "ProductModel",
 ]

@@ -6,6 +6,29 @@ export type AssessmentDimension =
   | 'women_workers'
   | 'minority_inclusion'
 
+export type FoodCategory =
+  | 'baby_food'
+  | 'bakery'
+  | 'beverages'
+  | 'biscuits_cookies'
+  | 'breakfast_cereals'
+  | 'candy'
+  | 'chocolate'
+  | 'coffee_tea'
+  | 'condiments_sauces'
+  | 'dairy'
+  | 'dairy_alternatives'
+  | 'desserts'
+  | 'frozen_foods'
+  | 'ice_cream'
+  | 'meat_alternatives'
+  | 'pasta_noodles'
+  | 'ready_meals'
+  | 'snacks_chips'
+  | 'spreads'
+  | 'yogurt'
+  | 'other'
+
 export type AssessmentStatus =
   | 'supported'
   | 'mixed'
@@ -45,12 +68,77 @@ export interface ProductResearchMetadata {
   researched_at: string
   model_name: string
   source_count: number
+  legal_entity: string | null
+  parent_company: string | null
+  jurisdiction: string | null
+  entity_source_url: string | null
+}
+
+export type CommunityReportStatus = 'pending_review' | 'published_unverified' | 'rejected'
+export type CommunityReportOutcome = 'positive' | 'negative'
+
+export interface CommunityReportAssessment {
+  dimension: AssessmentDimension
+  outcome: CommunityReportOutcome
+}
+
+export interface CommunityReportOutcomeCounts {
+  positive: number
+  negative: number
+}
+
+export interface CommunityReportSummary {
+  total: number
+  pending_review: number
+  assessment_counts: Partial<Record<AssessmentDimension, CommunityReportOutcomeCounts>>
+}
+
+export interface CommunityReport {
+  id: string
+  product_name: string | null
+  barcode: string | null
+  category: FoodCategory
+  assessments: CommunityReportAssessment[]
+  status: CommunityReportStatus
+  has_photo: boolean
+  document_count: number
+  submitted_at: string
+  notice: string
+}
+
+export interface CommunityReportAttachment {
+  id: string
+  file_name: string
+  mime_type: string
+  download_url: string
+}
+
+export interface PublicCommunityReport {
+  id: string
+  product_name: string | null
+  barcode: string | null
+  category: FoodCategory
+  assessments: CommunityReportAssessment[]
+  observations: string
+  evidence_url: string | null
+  photo_url: string | null
+  documents: CommunityReportAttachment[]
+  status: 'published_unverified'
+  published_at: string
+}
+
+export interface PublicCommunityReportList {
+  items: PublicCommunityReport[]
+  total: number
+  disclaimer: string
 }
 
 export interface ConsumerProduct {
-  barcode: string
+  barcode: string | null
   name: string
   brand: string | null
+  category: FoodCategory | null
+  catalog_product: boolean
   image_url: string | null
   source_url: string
   source_name: string
@@ -58,6 +146,7 @@ export interface ConsumerProduct {
   evidence_coverage_percent: number
   assessments: ConsumerAssessment[]
   research: ProductResearchMetadata | null
+  community_reports: CommunityReportSummary
 }
 
 export interface ConsumerSearchResponse {
@@ -91,4 +180,5 @@ export interface ConsumerAnswer {
   retrieval_model: string
   generation_model: string
   prompt_version: string
+  cached: boolean
 }

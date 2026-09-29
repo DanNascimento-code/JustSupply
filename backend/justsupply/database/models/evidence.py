@@ -8,6 +8,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     Uuid,
@@ -25,6 +26,11 @@ class BrandModel(Base):
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     name_key: Mapped[str] = mapped_column(String(400), nullable=False, unique=True)
+    legal_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    parent_company: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    jurisdiction: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    resolution_source_url: Mapped[str | None] = mapped_column(String(2083), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -47,6 +53,120 @@ class ProductModel(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ProductLabelImageModel(Base):
+    __tablename__ = "product_label_images"
+    __table_args__ = (
+        Index(
+            "uq_product_label_images_product_sha256",
+            "product_id",
+            "sha256",
+            unique=True,
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    product_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    image_data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CommunityReportModel(Base):
+    __tablename__ = "community_reports"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending_review', 'published_unverified', 'rejected')",
+            name="ck_community_reports_status",
+        ),
+        CheckConstraint(
+            "product_name IS NOT NULL OR barcode IS NOT NULL",
+            name="ck_community_reports_product_identity",
+        ),
+        CheckConstraint(
+            "category IN ('baby_food', 'bakery', 'beverages', 'biscuits_cookies', "
+            "'breakfast_cereals', 'candy', 'chocolate', 'coffee_tea', "
+            "'condiments_sauces', 'dairy', 'dairy_alternatives', 'desserts', "
+            "'frozen_foods', 'ice_cream', 'meat_alternatives', 'pasta_noodles', "
+            "'ready_meals', 'snacks_chips', 'spreads', 'yogurt', 'other')",
+            name="ck_community_reports_category",
+        ),
+        Index("ix_community_reports_barcode", "barcode"),
+        Index("ix_community_reports_category", "category"),
+        Index("ix_community_reports_product_name_key", "product_name_key"),
+        Index("ix_community_reports_status", "status"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    product_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("products.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    product_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    product_name_key: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    barcode: Mapped[str | None] = mapped_column(String(14), nullable=True)
+    category: Mapped[str] = mapped_column(String(50), nullable=False)
+    details: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_url: Mapped[str | None] = mapped_column(String(2083), nullable=True)
+    photo_mime_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    photo_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CommunityReportAssessmentModel(Base):
+    __tablename__ = "community_report_assessments"
+    __table_args__ = (
+        CheckConstraint(
+            "dimension IN ('vegan_composition', 'environmental_impact', "
+            "'women_workers', 'minority_inclusion')",
+            name="ck_community_report_assessments_dimension",
+        ),
+        CheckConstraint(
+            "outcome IN ('positive', 'negative')",
+            name="ck_community_report_assessments_outcome",
+        ),
+    )
+
+    report_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("community_reports.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    dimension: Mapped[str] = mapped_column(String(50), primary_key=True)
+    outcome: Mapped[str] = mapped_column(String(10), nullable=False)
+
+
+class CommunityReportAttachmentModel(Base):
+    __tablename__ = "community_report_attachments"
+    __table_args__ = (
+        Index(
+            "uq_community_report_attachments_report_sha256",
+            "report_id",
+            "sha256",
+            unique=True,
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    report_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("community_reports.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    file_data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class EvidenceSourceModel(Base):
@@ -133,6 +253,45 @@ class AiResearchRunModel(Base):
     provider_response_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     searched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CatalogSearchCacheModel(Base):
+    __tablename__ = "catalog_search_cache"
+
+    query_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    query_text: Mapped[str] = mapped_column(String(120), nullable=False)
+    query_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    products: Mapped[list[dict[str, object]]] = mapped_column(JSONB, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ConsumerAnswerCacheModel(Base):
+    __tablename__ = "consumer_answer_cache"
+    __table_args__ = (
+        Index(
+            "uq_consumer_answer_cache_lookup",
+            "research_run_id",
+            "question_key",
+            "language",
+            "top_k",
+            unique=True,
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    research_run_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("ai_research_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    question_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    question: Mapped[str] = mapped_column(String(500), nullable=False)
+    language: Mapped[str] = mapped_column(String(10), nullable=False)
+    top_k: Mapped[int] = mapped_column(Integer, nullable=False)
+    response: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

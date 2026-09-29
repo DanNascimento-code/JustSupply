@@ -27,10 +27,20 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("JUSTSUPPLY_GEMINI_API_KEY", "GEMINI_API_KEY"),
     )
-    gemini_model: str = "gemini-3.7-flash"
+    gemini_model: str = "gemini-3.1-flash-lite"
     gemini_embedding_model: str = "gemini-embedding-2"
     gemini_embedding_dimensions: Literal[1536] = 1536
+    gemini_timeout_seconds: float = 20.0
+    tavily_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("JUSTSUPPLY_TAVILY_API_KEY", "TAVILY_API_KEY"),
+    )
+    tavily_base_url: str = "https://api.tavily.com"
+    tavily_timeout_seconds: float = 20.0
+    wikidata_base_url: str = "https://www.wikidata.org"
+    wikidata_timeout_seconds: float = 10.0
     ai_research_ttl_days: int = 7
+    catalog_cache_ttl_hours: int = 24
 
 
 @lru_cache

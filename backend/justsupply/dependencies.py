@@ -17,10 +17,12 @@ from justsupply.integrations.ai import (
 from justsupply.integrations.gemini import (
     GeminiConsumerAnswerGenerator,
     GeminiEmbeddingProvider,
-    GeminiWebResearcher,
+    GeminiEvidenceResearcher,
 )
 from justsupply.integrations.langchain_rag import LangChainConsumerRag
 from justsupply.integrations.open_food_facts import OpenFoodFactsCatalog
+from justsupply.integrations.tavily import TavilyWebSearch
+from justsupply.integrations.wikidata import WikidataOrganizationResolver
 from justsupply.repositories.consumer_evidence import SqlAlchemyConsumerEvidenceRepository
 from justsupply.services.consumer import ConsumerResearchService, ConsumerService
 
@@ -30,7 +32,11 @@ def get_consumer_service(
 ) -> Iterator[ConsumerService]:
     catalog = _catalog()
     try:
-        yield ConsumerService(catalog, SqlAlchemyConsumerEvidenceRepository(session))
+        yield ConsumerService(
+            catalog,
+            SqlAlchemyConsumerEvidenceRepository(session),
+            catalog_cache_ttl_hours=get_settings().catalog_cache_ttl_hours,
+        )
     finally:
         catalog.close()
 
@@ -40,20 +46,54 @@ def get_consumer_research_service(
 ) -> Iterator[ConsumerResearchService]:
     settings = get_settings()
     catalog = _catalog()
-    key = settings.gemini_api_key.get_secret_value() if settings.gemini_api_key is not None else ""
+    gemini_key = (
+        settings.gemini_api_key.get_secret_value() if settings.gemini_api_key is not None else ""
+    )
+    tavily_key = (
+        settings.tavily_api_key.get_secret_value() if settings.tavily_api_key is not None else ""
+    )
     researcher: AiResearcher
     embedding_provider: EmbeddingProvider
     answer_generator: ConsumerAnswerGenerator
-    if key:
-        researcher = GeminiWebResearcher(key, settings.gemini_model)
+    search_provider: TavilyWebSearch | None = None
+    organization_resolver: WikidataOrganizationResolver | None = None
+    if gemini_key:
+        search_provider = TavilyWebSearch(
+            tavily_key or None,
+            settings.tavily_base_url,
+            settings.tavily_timeout_seconds,
+        )
+        organization_resolver = WikidataOrganizationResolver(
+            settings.wikidata_base_url,
+            settings.open_food_facts_user_agent,
+            settings.wikidata_timeout_seconds,
+        )
+        researcher = GeminiEvidenceResearcher(
+            gemini_key,
+            settings.gemini_model,
+            search_provider,
+            settings.gemini_timeout_seconds,
+            organization_resolver=organization_resolver,
+        )
+    else:
+        researcher = UnavailableResearcher(
+            settings.gemini_model,
+            "Add GEMINI_API_KEY to .env to synthesize public-source research.",
+        )
+
+    if gemini_key:
         embedding_provider = GeminiEmbeddingProvider(
-            key,
+            gemini_key,
             settings.gemini_embedding_model,
             settings.gemini_embedding_dimensions,
+            settings.gemini_timeout_seconds,
         )
-        answer_generator = GeminiConsumerAnswerGenerator(key, settings.gemini_model)
+        answer_generator = GeminiConsumerAnswerGenerator(
+            gemini_key,
+            settings.gemini_model,
+            settings.gemini_timeout_seconds,
+        )
     else:
-        researcher = UnavailableResearcher(settings.gemini_model)
         embedding_provider = UnavailableEmbeddingProvider(
             settings.gemini_embedding_model,
             settings.gemini_embedding_dimensions,
@@ -67,8 +107,13 @@ def get_consumer_research_service(
             embedding_provider,
             LangChainConsumerRag(answer_generator),
             ttl_days=settings.ai_research_ttl_days,
+            catalog_cache_ttl_hours=settings.catalog_cache_ttl_hours,
         )
     finally:
+        if search_provider is not None:
+            search_provider.close()
+        if organization_resolver is not None:
+            organization_resolver.close()
         catalog.close()
 
 

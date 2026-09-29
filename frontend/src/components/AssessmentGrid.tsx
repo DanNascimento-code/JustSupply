@@ -2,6 +2,7 @@ import type {
   AssessmentStatus,
   ConsumerAssessment,
 } from '../types/consumer'
+import { API_BASE_URL } from '../api/client'
 import { useI18n } from '../i18n'
 
 interface AssessmentGridProps {
@@ -63,7 +64,7 @@ export function AssessmentGrid({ assessments }: AssessmentGridProps) {
               <div className="assessment-sources">
                 {assessment.sources.map((source, index) => (
                   <a
-                    href={source.url}
+                    href={source.url.startsWith('/') ? `${API_BASE_URL}${source.url}` : source.url}
                     target="_blank"
                     rel="noreferrer"
                     key={`${source.url}-${index}`}

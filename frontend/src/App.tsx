@@ -6,6 +6,7 @@ import {
   Routes,
 } from 'react-router-dom'
 import { ConsumerSearchPage } from './pages/ConsumerSearchPage'
+import { CommunityReportsPage } from './pages/CommunityReportsPage'
 import { I18nProvider, useI18n, type Language } from './i18n'
 
 const languages: { code: Language; label: string }[] = [
@@ -26,6 +27,7 @@ function AppContent() {
           </Link>
 
           <div className="header-tools">
+            <Link className="header-link" to="/community-reports">{t('communityReports')}</Link>
             <span className="environment-badge">{t('appBadge')}</span>
             <div className="language-switcher" role="group" aria-label={t('languageLabel')}>
               {languages.map(({ code, label }) => (
@@ -45,6 +47,7 @@ function AppContent() {
 
         <Routes>
           <Route path="/" element={<ConsumerSearchPage />} />
+          <Route path="/community-reports" element={<CommunityReportsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
 

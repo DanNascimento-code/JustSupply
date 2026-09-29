@@ -11,6 +11,13 @@ class CatalogUnavailableError(Exception):
 
 
 @dataclass(frozen=True, slots=True)
+class CatalogAttribute:
+    status: str | None
+    match: float | None
+    title: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class CatalogProduct:
     barcode: str
     name: str
@@ -20,6 +27,16 @@ class CatalogProduct:
     environmental_score_grade: str | None
     last_updated_at: datetime | None
     source_url: str
+    ingredients_text: str | None = None
+    ingredients_tags: frozenset[str] = frozenset()
+    labels_tags: frozenset[str] = frozenset()
+    non_vegan_ingredients: tuple[str, ...] = ()
+    maybe_non_vegan_ingredients: tuple[str, ...] = ()
+    unknown_ingredients_count: int | None = None
+    vegan_attribute: CatalogAttribute | None = None
+    forest_footprint_attribute: CatalogAttribute | None = None
+    ingredients_image_url: str | None = None
+    brand_owner: str | None = None
 
 
 class ProductCatalog(Protocol):
@@ -34,8 +51,20 @@ class OpenFoodFactsCatalog:
             "product_name_pt",
             "product_name_en",
             "brands",
+            "brand_owner",
             "image_front_small_url",
+            "image_ingredients_url",
+            "image_ingredients_small_url",
             "ingredients_analysis_tags",
+            "ingredients_text",
+            "ingredients_text_en",
+            "ingredients_text_pt",
+            "ingredients_text_es",
+            "ingredients",
+            "ingredients_tags",
+            "labels_tags",
+            "unknown_ingredients_n",
+            "attribute_groups_data",
             "environmental_score_grade",
             "ecoscore_grade",
             "last_modified_t",
@@ -142,11 +171,29 @@ class OpenFoodFactsCatalog:
             barcode=barcode,
             name=name,
             brand=_read_text(payload, "brands"),
+            brand_owner=_read_text(payload, "brand_owner"),
             image_url=_read_text(payload, "image_front_small_url"),
             ingredients_analysis_tags=_read_tags(payload, "ingredients_analysis_tags"),
             environmental_score_grade=environmental_grade,
             last_updated_at=_read_timestamp(payload, "last_modified_t"),
             source_url=f"{self._base_url}/product/{barcode}",
+            ingredients_text=(
+                _read_text(payload, "ingredients_text")
+                or _read_text(payload, "ingredients_text_en")
+                or _read_text(payload, "ingredients_text_pt")
+                or _read_text(payload, "ingredients_text_es")
+            ),
+            ingredients_tags=_read_tags(payload, "ingredients_tags"),
+            labels_tags=_read_tags(payload, "labels_tags"),
+            non_vegan_ingredients=_ingredient_names(payload, {"no"}),
+            maybe_non_vegan_ingredients=_ingredient_names(payload, {"maybe", "unknown"}),
+            unknown_ingredients_count=_read_int(payload, "unknown_ingredients_n"),
+            vegan_attribute=_read_attribute(payload, "vegan"),
+            forest_footprint_attribute=_read_attribute(payload, "forest_footprint"),
+            ingredients_image_url=(
+                _read_text(payload, "image_ingredients_url")
+                or _read_text(payload, "image_ingredients_small_url")
+            ),
         )
 
 
@@ -178,3 +225,55 @@ def _read_timestamp(payload: Mapping[object, object], key: str) -> datetime | No
         return datetime.fromtimestamp(value, tz=UTC)
     except OverflowError, OSError, ValueError:
         return None
+
+
+def _read_int(payload: Mapping[object, object], key: str) -> int | None:
+    value = payload.get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _ingredient_names(
+    payload: Mapping[object, object],
+    vegan_values: set[str],
+) -> tuple[str, ...]:
+    ingredients = payload.get("ingredients")
+    if not isinstance(ingredients, list):
+        return ()
+    names: list[str] = []
+    for ingredient in ingredients:
+        if not isinstance(ingredient, Mapping):
+            continue
+        vegan = ingredient.get("vegan")
+        if not isinstance(vegan, str) or vegan.casefold() not in vegan_values:
+            continue
+        name = ingredient.get("text") or ingredient.get("id")
+        if isinstance(name, str) and name.strip() and name.strip() not in names:
+            names.append(name.strip())
+    return tuple(names[:8])
+
+
+def _read_attribute(
+    payload: Mapping[object, object],
+    attribute_id: str,
+) -> CatalogAttribute | None:
+    groups = payload.get("attribute_groups_data")
+    if not isinstance(groups, list):
+        return None
+    for group in groups:
+        if not isinstance(group, Mapping):
+            continue
+        attributes = group.get("attributes")
+        if not isinstance(attributes, list):
+            continue
+        for attribute in attributes:
+            if not isinstance(attribute, Mapping) or attribute.get("id") != attribute_id:
+                continue
+            status = attribute.get("status")
+            match = attribute.get("match")
+            title = attribute.get("title")
+            return CatalogAttribute(
+                status=status if isinstance(status, str) else None,
+                match=float(match) if isinstance(match, int | float) else None,
+                title=title.strip() if isinstance(title, str) and title.strip() else None,
+            )
+    return None

@@ -4,28 +4,41 @@ from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from uuid import UUID, uuid4
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from justsupply.database.models import (
     AiResearchRunModel,
     BrandModel,
+    CatalogSearchCacheModel,
     ClaimEvidenceRecordModel,
     ClaimModel,
+    CommunityReportAssessmentModel,
+    CommunityReportAttachmentModel,
+    CommunityReportModel,
+    ConsumerAnswerCacheModel,
     EvidenceRecordModel,
     EvidenceSourceModel,
+    ProductLabelImageModel,
     ProductModel,
 )
 from justsupply.domain.research import AiResearchResult, RetrievedEvidence
-from justsupply.integrations.open_food_facts import CatalogProduct
+from justsupply.integrations.open_food_facts import CatalogAttribute, CatalogProduct
 from justsupply.schemas.consumer import (
     AssessmentDimension,
     AssessmentSourceRead,
     AssessmentStatus,
+    CommunityReportAssessment,
+    CommunityReportCreate,
+    CommunityReportOutcome,
+    CommunityReportOutcomeCounts,
+    CommunityReportSummary,
+    ConsumerAnswerResponse,
     ConsumerAssessment,
     ConsumerProductRead,
     EvidenceScope,
+    FoodCategory,
     ProductResearchMetadata,
     UserLocale,
     VerificationLevel,
@@ -50,9 +63,506 @@ class StoredResearch:
     fresh: bool
 
 
+@dataclass(frozen=True)
+class StoredLabelImage:
+    data: bytes
+    mime_type: str
+
+
+@dataclass(frozen=True)
+class StoredCommunityReport:
+    id: UUID
+    submitted_at: datetime
+    document_count: int
+
+
+@dataclass(frozen=True)
+class CommunityReportDocumentInput:
+    file_name: str
+    mime_type: str
+    data: bytes
+
+
+@dataclass(frozen=True)
+class StoredCommunityAttachment:
+    id: UUID
+    file_name: str
+    mime_type: str
+    data: bytes
+
+
+@dataclass(frozen=True)
+class StoredPublicCommunityReport:
+    id: UUID
+    product_name: str | None
+    barcode: str | None
+    category: FoodCategory
+    assessments: tuple[CommunityReportAssessment, ...]
+    observations: str
+    evidence_url: str | None
+    has_photo: bool
+    documents: tuple[StoredCommunityAttachment, ...]
+    published_at: datetime
+
+
+@dataclass(frozen=True)
+class StoredCommunitySearchProduct:
+    report_id: UUID
+    product_name: str
+    barcode: str | None
+    category: FoodCategory
+    has_photo: bool
+    published_at: datetime
+    summary: CommunityReportSummary
+
+
 class SqlAlchemyConsumerEvidenceRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
+
+    def get_catalog_search(self, query: str) -> list[CatalogProduct] | None:
+        cache = self._session.get(CatalogSearchCacheModel, _query_key(query))
+        if cache is None or cache.expires_at <= datetime.now(UTC):
+            return None
+        try:
+            return [_catalog_product_from_json(item) for item in cache.products]
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def save_catalog_search(
+        self,
+        query: str,
+        products: Sequence[CatalogProduct],
+        *,
+        ttl_hours: int,
+    ) -> None:
+        now = datetime.now(UTC)
+        key = _query_key(query)
+        cache = self._session.get(CatalogSearchCacheModel, key)
+        if cache is None:
+            cache = CatalogSearchCacheModel(
+                query_key=key,
+                created_at=now,
+            )
+            self._session.add(cache)
+        cache.query_text = query.strip()
+        cache.query_type = "barcode" if query.strip().isdigit() else "text"
+        cache.products = [_catalog_product_to_json(product) for product in products]
+        cache.expires_at = now + timedelta(hours=ttl_hours)
+        cache.updated_at = now
+        try:
+            self._session.commit()
+        except IntegrityError as error:
+            self._session.rollback()
+            raise EvidencePersistenceError(
+                "The catalog search cache could not be saved."
+            ) from error
+
+    def save_label_image(
+        self,
+        barcode: str,
+        image_id: UUID,
+        data: bytes,
+        mime_type: str,
+    ) -> UUID:
+        product = self._get_product(barcode)
+        digest = _fingerprint_bytes(data)
+        existing = self._session.scalar(
+            select(ProductLabelImageModel).where(
+                ProductLabelImageModel.product_id == product.id,
+                ProductLabelImageModel.sha256 == digest,
+            )
+        )
+        if existing is not None:
+            return existing.id
+        self._session.add(
+            ProductLabelImageModel(
+                id=image_id,
+                product_id=product.id,
+                sha256=digest,
+                mime_type=mime_type,
+                image_data=data,
+                created_at=datetime.now(UTC),
+            )
+        )
+        try:
+            self._session.commit()
+        except IntegrityError as error:
+            self._session.rollback()
+            raise EvidencePersistenceError("The label image could not be saved.") from error
+        return image_id
+
+    def get_label_image(self, image_id: UUID) -> StoredLabelImage | None:
+        image = self._session.get(ProductLabelImageModel, image_id)
+        if image is None:
+            return None
+        return StoredLabelImage(data=image.image_data, mime_type=image.mime_type)
+
+    def save_community_report(
+        self,
+        report: CommunityReportCreate,
+        *,
+        photo_data: bytes | None,
+        photo_mime_type: str | None,
+        documents: Sequence[CommunityReportDocumentInput] = (),
+    ) -> StoredCommunityReport:
+        now = datetime.now(UTC)
+        product = (
+            self._session.scalar(
+                select(ProductModel).where(ProductModel.barcode == report.barcode)
+            )
+            if report.barcode is not None
+            else None
+        )
+        report_id = uuid4()
+        model = CommunityReportModel(
+            id=report_id,
+            product_id=product.id if product is not None else None,
+            product_name=report.product_name,
+            product_name_key=(
+                _name_key(report.product_name) if report.product_name is not None else None
+            ),
+            barcode=report.barcode,
+            category=report.category.value,
+            details=report.details,
+            evidence_url=str(report.evidence_url) if report.evidence_url is not None else None,
+            photo_mime_type=photo_mime_type,
+            photo_data=photo_data,
+            status="published_unverified",
+            created_at=now,
+            reviewed_at=None,
+        )
+        self._session.add(model)
+        try:
+            self._session.flush()
+            self._session.add_all(
+                CommunityReportAssessmentModel(
+                    report_id=report_id,
+                    dimension=assessment.dimension.value,
+                    outcome=assessment.outcome.value,
+                )
+                for assessment in report.assessments
+            )
+            self._session.add_all(
+                CommunityReportAttachmentModel(
+                    id=uuid4(),
+                    report_id=report_id,
+                    file_name=document.file_name,
+                    mime_type=document.mime_type,
+                    sha256=_fingerprint_bytes(document.data),
+                    file_data=document.data,
+                    created_at=now,
+                )
+                for document in documents
+            )
+            self._session.commit()
+        except IntegrityError as error:
+            self._session.rollback()
+            raise EvidencePersistenceError("The community report could not be saved.") from error
+        return StoredCommunityReport(
+            id=report_id,
+            submitted_at=now,
+            document_count=len(documents),
+        )
+
+    def list_public_community_reports(
+        self,
+        *,
+        barcode: str | None = None,
+        product_name: str | None = None,
+        category: FoodCategory | None = None,
+        limit: int = 50,
+    ) -> list[StoredPublicCommunityReport]:
+        statement = select(CommunityReportModel).where(
+            CommunityReportModel.status == "published_unverified"
+        )
+        identity_filters = []
+        if barcode is not None:
+            identity_filters.append(CommunityReportModel.barcode == barcode)
+        if product_name is not None:
+            identity_filters.append(
+                CommunityReportModel.product_name_key == _name_key(product_name)
+            )
+        if category is not None:
+            statement = statement.where(CommunityReportModel.category == category.value)
+        if identity_filters:
+            statement = statement.where(or_(*identity_filters))
+        reports = list(
+            self._session.scalars(
+                statement.order_by(CommunityReportModel.created_at.desc()).limit(limit)
+            ).all()
+        )
+        if not reports:
+            return []
+        report_ids = [report.id for report in reports]
+        assessments_by_report: dict[UUID, list[CommunityReportAssessment]] = {
+            report_id: [] for report_id in report_ids
+        }
+        for report_id, dimension, outcome in self._session.execute(
+            select(
+                CommunityReportAssessmentModel.report_id,
+                CommunityReportAssessmentModel.dimension,
+                CommunityReportAssessmentModel.outcome,
+            ).where(CommunityReportAssessmentModel.report_id.in_(report_ids))
+        ).all():
+            if (
+                dimension in {item.value for item in AssessmentDimension}
+                and outcome in {item.value for item in CommunityReportOutcome}
+            ):
+                assessments_by_report[report_id].append(
+                    CommunityReportAssessment(
+                        dimension=AssessmentDimension(dimension),
+                        outcome=CommunityReportOutcome(outcome),
+                    )
+                )
+        documents_by_report: dict[UUID, list[StoredCommunityAttachment]] = {
+            report_id: [] for report_id in report_ids
+        }
+        for attachment in self._session.scalars(
+            select(CommunityReportAttachmentModel).where(
+                CommunityReportAttachmentModel.report_id.in_(report_ids)
+            )
+        ).all():
+            documents_by_report[attachment.report_id].append(
+                StoredCommunityAttachment(
+                    id=attachment.id,
+                    file_name=attachment.file_name,
+                    mime_type=attachment.mime_type,
+                    data=attachment.file_data,
+                )
+            )
+        return [
+            StoredPublicCommunityReport(
+                id=report.id,
+                product_name=report.product_name,
+                barcode=report.barcode,
+                category=FoodCategory(report.category),
+                assessments=tuple(assessments_by_report[report.id]),
+                observations=report.details,
+                evidence_url=report.evidence_url,
+                has_photo=report.photo_data is not None,
+                documents=tuple(documents_by_report[report.id]),
+                published_at=report.created_at,
+            )
+            for report in reports
+        ]
+
+    def search_community_products(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+    ) -> list[StoredCommunitySearchProduct]:
+        normalized_query = query.strip()
+        name_query = _name_key(normalized_query)
+        filters = [CommunityReportModel.product_name_key.contains(name_query)]
+        if normalized_query.isdigit():
+            filters.append(CommunityReportModel.barcode == normalized_query)
+        reports = list(
+            self._session.scalars(
+                select(CommunityReportModel)
+                .where(
+                    CommunityReportModel.status == "published_unverified",
+                    or_(*filters),
+                )
+                .order_by(CommunityReportModel.created_at.desc())
+                .limit(200)
+            ).all()
+        )
+        results: list[StoredCommunitySearchProduct] = []
+        seen: set[tuple[str | None, str | None]] = set()
+        for report in reports:
+            key = (report.barcode, report.product_name_key)
+            if key in seen:
+                continue
+            seen.add(key)
+            product_name = report.product_name or f"Product {report.barcode}"
+            results.append(
+                StoredCommunitySearchProduct(
+                    report_id=report.id,
+                    product_name=product_name,
+                    barcode=report.barcode,
+                    category=FoodCategory(report.category),
+                    has_photo=report.photo_data is not None,
+                    published_at=report.created_at,
+                    summary=self.get_community_report_summary(
+                        report.barcode,
+                        product_name,
+                    ),
+                )
+            )
+            if len(results) >= limit:
+                break
+        return results
+
+    def get_public_community_report_photo(
+        self,
+        report_id: UUID,
+    ) -> StoredLabelImage | None:
+        report = self._session.get(CommunityReportModel, report_id)
+        if (
+            report is None
+            or report.status != "published_unverified"
+            or report.photo_data is None
+            or report.photo_mime_type is None
+        ):
+            return None
+        return StoredLabelImage(data=report.photo_data, mime_type=report.photo_mime_type)
+
+    def get_public_community_report_document(
+        self,
+        report_id: UUID,
+        attachment_id: UUID,
+    ) -> StoredCommunityAttachment | None:
+        attachment = self._session.scalar(
+            select(CommunityReportAttachmentModel)
+            .join(
+                CommunityReportModel,
+                CommunityReportModel.id == CommunityReportAttachmentModel.report_id,
+            )
+            .where(
+                CommunityReportAttachmentModel.id == attachment_id,
+                CommunityReportAttachmentModel.report_id == report_id,
+                CommunityReportModel.status == "published_unverified",
+            )
+        )
+        if attachment is None:
+            return None
+        return StoredCommunityAttachment(
+            id=attachment.id,
+            file_name=attachment.file_name,
+            mime_type=attachment.mime_type,
+            data=attachment.file_data,
+        )
+
+    def get_community_report_summary(
+        self,
+        barcode: str | None,
+        product_name: str,
+    ) -> CommunityReportSummary:
+        identity_filters = [
+            CommunityReportModel.product_name_key == _name_key(product_name)
+        ]
+        if barcode is not None:
+            identity_filters.append(CommunityReportModel.barcode == barcode)
+        identity = or_(*identity_filters)
+        active = CommunityReportModel.status.in_(
+            ("pending_review", "published_unverified")
+        )
+        total = self._session.scalar(
+            select(func.count(CommunityReportModel.id)).where(identity, active)
+        ) or 0
+        pending = self._session.scalar(
+            select(func.count(CommunityReportModel.id)).where(
+                identity,
+                CommunityReportModel.status == "pending_review",
+            )
+        ) or 0
+        rows = self._session.execute(
+            select(
+                CommunityReportAssessmentModel.dimension,
+                CommunityReportAssessmentModel.outcome,
+                func.count(CommunityReportAssessmentModel.report_id),
+            )
+            .join(
+                CommunityReportModel,
+                CommunityReportModel.id == CommunityReportAssessmentModel.report_id,
+            )
+            .where(identity, active)
+            .group_by(
+                CommunityReportAssessmentModel.dimension,
+                CommunityReportAssessmentModel.outcome,
+            )
+        ).all()
+        counts: dict[AssessmentDimension, CommunityReportOutcomeCounts] = {}
+        for dimension, outcome, count in rows:
+            if (
+                dimension not in {item.value for item in AssessmentDimension}
+                or outcome not in {item.value for item in CommunityReportOutcome}
+            ):
+                continue
+            assessment_dimension = AssessmentDimension(dimension)
+            current = counts.setdefault(
+                assessment_dimension,
+                CommunityReportOutcomeCounts(),
+            )
+            counts[assessment_dimension] = current.model_copy(update={outcome: count})
+        return CommunityReportSummary(
+            total=total,
+            pending_review=pending,
+            assessment_counts=counts,
+        )
+
+    def get_cached_answer(
+        self,
+        barcode: str,
+        question: str,
+        *,
+        top_k: int,
+        language: UserLocale,
+    ) -> ConsumerAnswerResponse | None:
+        product = self._get_product(barcode)
+        run = self._latest_research_run(product.id)
+        if run is None:
+            return None
+        cache = self._session.scalar(
+            select(ConsumerAnswerCacheModel).where(
+                ConsumerAnswerCacheModel.research_run_id == run.id,
+                ConsumerAnswerCacheModel.question_key == _question_key(question),
+                ConsumerAnswerCacheModel.language == language.value,
+                ConsumerAnswerCacheModel.top_k == top_k,
+            )
+        )
+        if cache is None:
+            return None
+        try:
+            return ConsumerAnswerResponse.model_validate(cache.response).model_copy(
+                update={"cached": True}
+            )
+        except ValueError:
+            return None
+
+    def save_cached_answer(
+        self,
+        barcode: str,
+        question: str,
+        response: ConsumerAnswerResponse,
+        *,
+        top_k: int,
+        language: UserLocale,
+    ) -> None:
+        product = self._get_product(barcode)
+        run = self._latest_research_run(product.id)
+        if run is None:
+            return
+        key = _question_key(question)
+        cache = self._session.scalar(
+            select(ConsumerAnswerCacheModel).where(
+                ConsumerAnswerCacheModel.research_run_id == run.id,
+                ConsumerAnswerCacheModel.question_key == key,
+                ConsumerAnswerCacheModel.language == language.value,
+                ConsumerAnswerCacheModel.top_k == top_k,
+            )
+        )
+        if cache is None:
+            cache = ConsumerAnswerCacheModel(
+                id=uuid4(),
+                research_run_id=run.id,
+                question_key=key,
+                language=language.value,
+                top_k=top_k,
+                created_at=datetime.now(UTC),
+            )
+            self._session.add(cache)
+        cache.question = question.strip()
+        cache.response = response.model_copy(update={"cached": False}).model_dump(mode="json")
+        try:
+            self._session.commit()
+        except IntegrityError as error:
+            self._session.rollback()
+            raise EvidencePersistenceError(
+                "The grounded answer cache could not be saved."
+            ) from error
 
     def save_many(self, products: Sequence[AssessedCatalogProduct]) -> None:
         now = datetime.now(UTC)
@@ -75,36 +585,90 @@ class SqlAlchemyConsumerEvidenceRepository:
         self,
         barcode: str,
         language: UserLocale = UserLocale.ENGLISH,
+        *,
+        expected_prompt_version: str | None = None,
     ) -> StoredResearch | None:
         product = self._get_product(barcode)
-        run = self._latest_research_run(product.id)
-        if run is None:
+        product_run = self._latest_research_run(product.id)
+        brand_run = (
+            self._latest_brand_research_run(product.brand_id)
+            if product.brand_id is not None
+            else None
+        )
+        if product_run is None and brand_run is None:
             return None
-        claims = self._session.scalars(
-            select(ClaimModel).where(
-                (ClaimModel.product_id == product.id)
-                | ((ClaimModel.brand_id == product.brand_id) & (ClaimModel.brand_id.is_not(None))),
+        assessments: dict[AssessmentDimension, ConsumerAssessment] = {}
+        run_ids: set[UUID] = set()
+        if brand_run is not None and product.brand_id is not None:
+            run_ids.add(brand_run.id)
+            brand_statement = select(ClaimModel).where(
+                ClaimModel.brand_id == product.brand_id,
                 ClaimModel.origin == "ai_research",
             )
-        ).all()
-        assessments = {
-            AssessmentDimension(claim.dimension): self._research_assessment(claim, run.id, language)
-            for claim in claims
-            if claim.dimension in {item.value for item in AssessmentDimension}
-        }
+            if brand_run.product_id != product.id:
+                brand_statement = brand_statement.where(
+                    ClaimModel.dimension.in_(
+                        {
+                            AssessmentDimension.WOMEN_WORKERS.value,
+                            AssessmentDimension.MINORITY_INCLUSION.value,
+                        }
+                    )
+                )
+            for claim in self._session.scalars(brand_statement).all():
+                if claim.dimension in {item.value for item in AssessmentDimension}:
+                    dimension = AssessmentDimension(claim.dimension)
+                    assessments[dimension] = self._research_assessment(
+                        claim, brand_run.id, language
+                    )
+        if product_run is not None:
+            run_ids.add(product_run.id)
+            product_claims = self._session.scalars(
+                select(ClaimModel).where(
+                    ClaimModel.product_id == product.id,
+                    ClaimModel.origin == "ai_research",
+                )
+            ).all()
+            for claim in product_claims:
+                if claim.dimension in {item.value for item in AssessmentDimension}:
+                    dimension = AssessmentDimension(claim.dimension)
+                    assessments[dimension] = self._research_assessment(
+                        claim, product_run.id, language
+                    )
+        selected_run = product_run or brand_run
+        if selected_run is None:
+            return None
+        brand = self._session.get(BrandModel, product.brand_id) if product.brand_id else None
         total_sources = len(
             self._session.scalars(
-                select(EvidenceRecordModel.id).where(EvidenceRecordModel.research_run_id == run.id)
+                select(EvidenceRecordModel.id).where(
+                    EvidenceRecordModel.research_run_id.in_(run_ids)
+                )
             ).all()
         )
         return StoredResearch(
             assessments=assessments,
             metadata=ProductResearchMetadata(
-                researched_at=run.searched_at,
-                model_name=run.model_name,
+                researched_at=max(
+                    run.searched_at
+                    for run in (product_run, brand_run)
+                    if run is not None
+                ),
+                model_name=selected_run.model_name,
                 source_count=total_sources,
+                legal_entity=brand.legal_name if brand is not None else None,
+                parent_company=brand.parent_company if brand is not None else None,
+                jurisdiction=brand.jurisdiction if brand is not None else None,
+                entity_source_url=(
+                    brand.resolution_source_url if brand is not None else None
+                ),
             ),
-            fresh=run.expires_at > datetime.now(UTC),
+            fresh=(
+                product_run is not None and product_run.expires_at > datetime.now(UTC)
+                and (
+                    expected_prompt_version is None
+                    or product_run.prompt_version == expected_prompt_version
+                )
+            ),
         )
 
     def save_research(
@@ -147,7 +711,9 @@ class SqlAlchemyConsumerEvidenceRepository:
                 fingerprint=_fingerprint(f"{run.id}\0{source.url}\0{source.cited_text}"),
                 summary=source.cited_text,
                 excerpt=source.cited_text,
-                source_location="Gemini grounded web research",
+                source_location=(
+                    f"Public web research — {source.focus} — {source.source_class}"
+                ),
                 observed_at=None,
                 collected_at=now,
                 created_at=now,
@@ -160,6 +726,25 @@ class SqlAlchemyConsumerEvidenceRepository:
         self._session.flush()
 
         brand = self._session.get(BrandModel, product.brand_id) if product.brand_id else None
+        if brand is not None and result.organization is not None:
+            organization = result.organization
+            if organization.legal_name is not None:
+                brand.legal_name = organization.legal_name
+            if organization.parent_company is not None:
+                brand.parent_company = organization.parent_company
+            if organization.jurisdiction is not None:
+                brand.jurisdiction = organization.jurisdiction
+            first_source = next(
+                (
+                    result.sources[number - 1]
+                    for number in organization.source_numbers
+                    if 1 <= number <= len(result.sources)
+                ),
+                None,
+            )
+            if first_source is not None:
+                brand.resolution_source_url = first_source.url
+            brand.resolved_at = result.searched_at
         for assessment in result.assessments:
             claim = self._upsert_research_claim(product, brand, assessment, now)
             self._session.flush()
@@ -198,15 +783,23 @@ class SqlAlchemyConsumerEvidenceRepository:
         top_k: int,
     ) -> list[RetrievedEvidence]:
         product = self._get_product(barcode)
-        run = self._latest_research_run(product.id)
-        if run is None:
+        product_run = self._latest_research_run(product.id)
+        brand_run = (
+            self._latest_brand_research_run(product.brand_id)
+            if product.brand_id is not None
+            else None
+        )
+        run_ids = {
+            run.id for run in (product_run, brand_run) if run is not None
+        }
+        if not run_ids:
             return []
         distance = EvidenceRecordModel.embedding.cosine_distance(embedding).label("distance")
         rows = self._session.execute(
             select(EvidenceRecordModel, EvidenceSourceModel, distance)
             .join(EvidenceSourceModel, EvidenceSourceModel.id == EvidenceRecordModel.source_id)
             .where(
-                EvidenceRecordModel.research_run_id == run.id,
+                EvidenceRecordModel.research_run_id.in_(run_ids),
                 EvidenceRecordModel.embedding.is_not(None),
                 EvidenceRecordModel.embedding_model == embedding_model,
                 EvidenceRecordModel.embedding_dimensions == embedding_dimensions,
@@ -538,6 +1131,15 @@ class SqlAlchemyConsumerEvidenceRepository:
             .limit(1)
         )
 
+    def _latest_brand_research_run(self, brand_id: UUID) -> AiResearchRunModel | None:
+        return self._session.scalar(
+            select(AiResearchRunModel)
+            .join(ProductModel, ProductModel.id == AiResearchRunModel.product_id)
+            .where(ProductModel.brand_id == brand_id)
+            .order_by(AiResearchRunModel.searched_at.desc())
+            .limit(1)
+        )
+
 
 def _primary_brand_name(names: str | None) -> str | None:
     if names is None:
@@ -548,6 +1150,110 @@ def _primary_brand_name(names: str | None) -> str | None:
 
 def _fingerprint(value: str) -> str:
     return sha256(value.encode("utf-8")).hexdigest()
+
+
+def _fingerprint_bytes(value: bytes) -> str:
+    return sha256(value).hexdigest()
+
+
+def _query_key(query: str) -> str:
+    return _fingerprint(" ".join(query.split()).casefold())
+
+
+def _question_key(question: str) -> str:
+    return _fingerprint(" ".join(question.split()).casefold())
+
+
+def _name_key(name: str) -> str:
+    return " ".join(name.split()).casefold()
+
+
+def _catalog_product_to_json(product: CatalogProduct) -> dict[str, object]:
+    return {
+        "barcode": product.barcode,
+        "name": product.name,
+        "brand": product.brand,
+        "image_url": product.image_url,
+        "ingredients_analysis_tags": sorted(product.ingredients_analysis_tags),
+        "environmental_score_grade": product.environmental_score_grade,
+        "last_updated_at": (
+            product.last_updated_at.isoformat() if product.last_updated_at is not None else None
+        ),
+        "source_url": product.source_url,
+        "ingredients_text": product.ingredients_text,
+        "ingredients_tags": sorted(product.ingredients_tags),
+        "labels_tags": sorted(product.labels_tags),
+        "non_vegan_ingredients": list(product.non_vegan_ingredients),
+        "maybe_non_vegan_ingredients": list(product.maybe_non_vegan_ingredients),
+        "unknown_ingredients_count": product.unknown_ingredients_count,
+        "vegan_attribute": _attribute_to_json(product.vegan_attribute),
+        "forest_footprint_attribute": _attribute_to_json(product.forest_footprint_attribute),
+        "ingredients_image_url": product.ingredients_image_url,
+        "brand_owner": product.brand_owner,
+    }
+
+
+def _catalog_product_from_json(payload: dict[str, object]) -> CatalogProduct:
+    updated = payload.get("last_updated_at")
+    return CatalogProduct(
+        barcode=str(payload["barcode"]),
+        name=str(payload["name"]),
+        brand=_optional_string(payload.get("brand")),
+        image_url=_optional_string(payload.get("image_url")),
+        ingredients_analysis_tags=_string_set(payload.get("ingredients_analysis_tags")),
+        environmental_score_grade=_optional_string(payload.get("environmental_score_grade")),
+        last_updated_at=(datetime.fromisoformat(updated) if isinstance(updated, str) else None),
+        source_url=str(payload["source_url"]),
+        ingredients_text=_optional_string(payload.get("ingredients_text")),
+        ingredients_tags=_string_set(payload.get("ingredients_tags")),
+        labels_tags=_string_set(payload.get("labels_tags")),
+        non_vegan_ingredients=_string_tuple(payload.get("non_vegan_ingredients")),
+        maybe_non_vegan_ingredients=_string_tuple(payload.get("maybe_non_vegan_ingredients")),
+        unknown_ingredients_count=_optional_int(payload.get("unknown_ingredients_count")),
+        vegan_attribute=_attribute_from_json(payload.get("vegan_attribute")),
+        forest_footprint_attribute=_attribute_from_json(
+            payload.get("forest_footprint_attribute")
+        ),
+        ingredients_image_url=_optional_string(payload.get("ingredients_image_url")),
+        brand_owner=_optional_string(payload.get("brand_owner")),
+    )
+
+
+def _attribute_to_json(attribute: CatalogAttribute | None) -> dict[str, object] | None:
+    if attribute is None:
+        return None
+    return {"status": attribute.status, "match": attribute.match, "title": attribute.title}
+
+
+def _attribute_from_json(value: object) -> CatalogAttribute | None:
+    if not isinstance(value, dict):
+        return None
+    status = value.get("status")
+    match = value.get("match")
+    title = value.get("title")
+    return CatalogAttribute(
+        status=status if isinstance(status, str) else None,
+        match=float(match) if isinstance(match, int | float) else None,
+        title=title if isinstance(title, str) else None,
+    )
+
+
+def _optional_string(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _optional_int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _string_set(value: object) -> frozenset[str]:
+    if not isinstance(value, list):
+        return frozenset()
+    return frozenset(item for item in value if isinstance(item, str))
+
+
+def _string_tuple(value: object) -> tuple[str, ...]:
+    return tuple(item for item in value if isinstance(item, str)) if isinstance(value, list) else ()
 
 
 def _localized_claim_content(

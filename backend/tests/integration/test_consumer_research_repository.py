@@ -5,17 +5,30 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import delete, select
 
-from justsupply.database.models import EvidenceSourceModel, ProductModel
+from justsupply.database.models import (
+    CommunityReportAttachmentModel,
+    CommunityReportModel,
+    EvidenceSourceModel,
+    ProductModel,
+)
 from justsupply.database.session import SessionFactory
 from justsupply.domain.research import AiResearchResult, GroundedWebSource
 from justsupply.integrations.open_food_facts import CatalogProduct
-from justsupply.repositories.consumer_evidence import SqlAlchemyConsumerEvidenceRepository
+from justsupply.repositories.consumer_evidence import (
+    CommunityReportDocumentInput,
+    SqlAlchemyConsumerEvidenceRepository,
+)
 from justsupply.schemas.consumer import (
     AiResearchAssessment,
     AiResearchTranslations,
     AssessmentDimension,
     AssessmentStatus,
+    CommunityReportAssessment,
+    CommunityReportCreate,
+    CommunityReportOutcome,
+    ConsumerAnswerResponse,
     EvidenceScope,
+    FoodCategory,
     LocalizedAssessmentText,
     UserLocale,
 )
@@ -141,7 +154,7 @@ def test_research_is_persisted_and_retrieved_by_vector_similarity() -> None:
             barcode,
             result,
             model_name="gemini-test",
-            prompt_version="consumer-web-research-v1",
+            prompt_version="consumer-tavily-gemini-research-v2",
             embeddings=[first_embedding, second_embedding],
             embedding_model="gemini-embedding-test",
             embedding_dimensions=1536,
@@ -166,9 +179,131 @@ def test_research_is_persisted_and_retrieved_by_vector_similarity() -> None:
         )
         assert retrieved[0].title == "Certification registry"
         assert retrieved[0].similarity == pytest.approx(1.0)
+        catalog_cache = repository.get_catalog_search(barcode)
+        assert catalog_cache is not None
+        assert catalog_cache[0].barcode == barcode
+        image_id = repository.save_label_image(
+            barcode,
+            uuid4(),
+            b"\x89PNG\r\n\x1a\nlabel",
+            "image/png",
+        )
+        stored_image = repository.get_label_image(image_id)
+        assert stored_image is not None
+        assert stored_image.mime_type == "image/png"
+
+        community_report = repository.save_community_report(
+            CommunityReportCreate(
+                product_name=product.name,
+                barcode=barcode,
+                category=FoodCategory.SNACKS_CHIPS,
+                assessments=[
+                    CommunityReportAssessment(
+                        dimension=AssessmentDimension.ENVIRONMENTAL_IMPACT,
+                        outcome=CommunityReportOutcome.POSITIVE,
+                    ),
+                    CommunityReportAssessment(
+                        dimension=AssessmentDimension.MINORITY_INCLUSION,
+                        outcome=CommunityReportOutcome.NEGATIVE,
+                    ),
+                ],
+                details="The package claim should be independently reviewed.",
+            ),
+            photo_data=b"\x89PNG\r\n\x1a\nreport",
+            photo_mime_type="image/png",
+            documents=[
+                CommunityReportDocumentInput(
+                    file_name="supporting-evidence.pdf",
+                    mime_type="application/pdf",
+                    data=b"%PDF-1.7\nsupporting evidence",
+                )
+            ],
+        )
+        assert community_report.document_count == 1
+        attachment = session.scalar(
+            select(CommunityReportAttachmentModel).where(
+                CommunityReportAttachmentModel.report_id == community_report.id
+            )
+        )
+        assert attachment is not None
+        assert attachment.file_name == "supporting-evidence.pdf"
+        report_summary = repository.get_community_report_summary(barcode, product.name)
+        assert report_summary.total == 1
+        assert report_summary.pending_review == 0
+        assert (
+            report_summary.assessment_counts[
+                AssessmentDimension.ENVIRONMENTAL_IMPACT
+            ].positive
+            == 1
+        )
+        assert (
+            report_summary.assessment_counts[
+                AssessmentDimension.MINORITY_INCLUSION
+            ].negative
+            == 1
+        )
+        public_reports = repository.list_public_community_reports(
+            barcode=barcode,
+            product_name=product.name,
+            category=FoodCategory.SNACKS_CHIPS,
+        )
+        assert len(public_reports) == 1
+        assert public_reports[0].observations.startswith("The package claim")
+        assert public_reports[0].has_photo is True
+        assert public_reports[0].category == FoodCategory.SNACKS_CHIPS
+        assert repository.list_public_community_reports(
+            category=FoodCategory.ICE_CREAM
+        ) == []
+        community_products = repository.search_community_products(product.name)
+        assert len(community_products) == 1
+        assert community_products[0].category == FoodCategory.SNACKS_CHIPS
+        assert (
+            community_products[0]
+            .summary.assessment_counts[AssessmentDimension.ENVIRONMENTAL_IMPACT]
+            .positive
+            == 1
+        )
+        public_photo = repository.get_public_community_report_photo(community_report.id)
+        assert public_photo is not None
+        public_document = repository.get_public_community_report_document(
+            community_report.id,
+            attachment.id,
+        )
+        assert public_document is not None
+        assert public_document.data.startswith(b"%PDF-")
+
+        answer = ConsumerAnswerResponse(
+            question="Is it vegan?",
+            answer="The certification registry supports this conclusion [1].",
+            insufficient_evidence=False,
+            citations=[],
+            retrieval_model="gemini-embedding-test",
+            generation_model="gemini-test",
+            prompt_version="consumer-evidence-rag-v1",
+        )
+        repository.save_cached_answer(
+            barcode,
+            answer.question,
+            answer,
+            top_k=4,
+            language=UserLocale.ENGLISH,
+        )
+        cached_answer = repository.get_cached_answer(
+            barcode,
+            answer.question,
+            top_k=4,
+            language=UserLocale.ENGLISH,
+        )
+        assert cached_answer is not None
+        assert cached_answer.cached is True
 
         stored_product = session.scalar(select(ProductModel).where(ProductModel.barcode == barcode))
         assert stored_product is not None
+        session.execute(
+            delete(CommunityReportModel).where(
+                CommunityReportModel.id == community_report.id
+            )
+        )
         session.execute(delete(ProductModel).where(ProductModel.id == stored_product.id))
         session.execute(delete(EvidenceSourceModel).where(EvidenceSourceModel.url.in_(source_urls)))
         session.execute(

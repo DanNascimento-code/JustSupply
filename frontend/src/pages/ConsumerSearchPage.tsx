@@ -2,6 +2,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { searchConsumerProducts } from '../api/consumer'
 import { ConsumerProductCard } from '../components/ConsumerProductCard'
+import { CommunityReportForm } from '../components/CommunityReportForm'
 import { useI18n } from '../i18n'
 
 const exampleQueries = ['Oatly', 'dark chocolate', '3017620422003'] as const
@@ -116,6 +117,7 @@ export function ConsumerSearchPage() {
         {searchMutation.isError ? (
           <div className="consumer-state error-state" role="alert">
             <strong>{t('searchFailed')}</strong>
+            {searchMutation.error instanceof Error ? <p>{searchMutation.error.message}</p> : null}
           </div>
         ) : null}
 
@@ -146,7 +148,10 @@ export function ConsumerSearchPage() {
             ) : (
               <div className="consumer-product-list">
                 {result.items.map((product) => (
-                  <ConsumerProductCard product={product} key={`${product.barcode}-${language}`} />
+                  <ConsumerProductCard
+                    product={product}
+                    key={`${product.barcode ?? product.name}-${language}`}
+                  />
                 ))}
               </div>
             )}
@@ -175,6 +180,7 @@ export function ConsumerSearchPage() {
           </div>
         ) : null}
       </section>
+      <CommunityReportForm />
     </main>
   )
 }

@@ -1,6 +1,7 @@
 import { useMutation } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 import { askConsumerEvidence } from '../api/consumer'
+import { API_BASE_URL } from '../api/client'
 import { useI18n } from '../i18n'
 
 interface ConsumerEvidenceAssistantProps {
@@ -67,7 +68,12 @@ export function ConsumerEvidenceAssistant({
           </strong>
           <p>{answerMutation.data.answer}</p>
           {answerMutation.data.citations.map((citation) => (
-            <a href={citation.url} target="_blank" rel="noreferrer" key={citation.evidence_id}>
+            <a
+              href={citation.url.startsWith('/') ? `${API_BASE_URL}${citation.url}` : citation.url}
+              target="_blank"
+              rel="noreferrer"
+              key={citation.evidence_id}
+            >
               [{citation.number}] {citation.title} · {t('match', { value: Math.round(citation.similarity * 100) })}
             </a>
           ))}

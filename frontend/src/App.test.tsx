@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
@@ -9,12 +9,15 @@ const product: ConsumerProduct = {
   barcode: '7891000100103',
   name: 'Dark chocolate',
   brand: 'Example Foods',
+  category: null,
+  catalog_product: true,
   image_url: 'https://images.openfoodfacts.org/product.jpg',
   source_url: 'https://world.openfoodfacts.org/product/7891000100103',
   source_name: 'Open Food Facts',
   last_updated_at: '2026-09-14T12:00:00Z',
   evidence_coverage_percent: 50,
   research: null,
+  community_reports: { total: 0, pending_review: 0, assessment_counts: {} },
   assessments: [
     {
       dimension: 'vegan_composition',
@@ -72,7 +75,7 @@ const product: ConsumerProduct = {
 }
 
 const searchResult: ConsumerSearchResponse = {
-  query: product.barcode,
+  query: product.barcode!,
   query_type: 'barcode',
   total: 1,
   disclaimer: 'Inspect every source.',
@@ -86,6 +89,10 @@ const researchedProduct: ConsumerProduct = {
     researched_at: '2026-09-25T12:00:00Z',
     model_name: 'gemini-test',
     source_count: 2,
+    legal_entity: null,
+    parent_company: null,
+    jurisdiction: null,
+    entity_source_url: null,
   },
   assessments: product.assessments.map((assessment) =>
     assessment.dimension === 'women_workers'
@@ -161,7 +168,7 @@ describe('consumer evidence experience', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(searchResult)))
     const user = userEvent.setup()
     renderApp()
-    await user.type(screen.getByLabelText('Product, brand, or barcode'), product.barcode)
+    await user.type(screen.getByLabelText('Product, brand, or barcode'), product.barcode!)
     await user.click(screen.getByRole('button', { name: 'Search evidence' }))
     expect(await screen.findByRole('heading', { name: product.name })).toBeInTheDocument()
     expect(screen.getByAltText(`${product.name} package`)).toBeInTheDocument()
@@ -170,7 +177,8 @@ describe('consumer evidence experience', () => {
   })
 
   it('researches public sources and answers a grounded question', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void init
       const url = input.toString()
       if (url.includes('/research')) {
         return jsonResponse({ product: researchedProduct, cached: false })
@@ -194,6 +202,7 @@ describe('consumer evidence experience', () => {
           retrieval_model: 'gemini-embedding-test',
           generation_model: 'gemini-test',
           prompt_version: 'consumer-evidence-rag-v1',
+          cached: false,
         })
       }
       return jsonResponse(searchResult)
@@ -201,9 +210,9 @@ describe('consumer evidence experience', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
     renderApp()
-    await user.type(screen.getByLabelText('Product, brand, or barcode'), product.barcode)
+    await user.type(screen.getByLabelText('Product, brand, or barcode'), product.barcode!)
     await user.click(screen.getByRole('button', { name: 'Search evidence' }))
-    await user.click(await screen.findByRole('button', { name: 'Research with Gemini' }))
+    await user.click(await screen.findByRole('button', { name: 'Research public sources' }))
     expect(await screen.findByText('2 cited sources researched')).toBeInTheDocument()
     await user.type(
       screen.getByLabelText(`Question about ${product.name}`),
@@ -212,5 +221,94 @@ describe('consumer evidence experience', () => {
     await user.click(screen.getByRole('button', { name: 'Ask' }))
     expect(await screen.findByText(/Two sources describe a leadership program/)).toBeInTheDocument()
     expect(screen.getByText(/91% match/)).toBeInTheDocument()
+  })
+
+  it('submits product assessments as an unverified community report', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void init
+      if (input.toString().includes('/consumer/reports')) {
+        return jsonResponse({
+          id: 'c0f919a1-e9c4-40eb-9aec-43344509833b',
+          product_name: 'Example drink',
+          barcode: null,
+          category: 'beverages',
+          assessments: [{ dimension: 'environmental_impact', outcome: 'negative' }],
+          status: 'published_unverified',
+          has_photo: false,
+          document_count: 0,
+          submitted_at: '2026-09-28T20:00:00Z',
+          notice: 'Your report was published as unverified community content.',
+        }, 201)
+      }
+      return jsonResponse(searchResult)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+    renderApp()
+
+    await user.type(screen.getByLabelText(/Product or brand name/), 'Example drink')
+    await user.selectOptions(screen.getByLabelText('Food category'), 'beverages')
+    await user.click(
+      within(screen.getByRole('group', { name: 'Is this product sustainable?' }))
+        .getByLabelText('No'),
+    )
+    await user.type(
+      screen.getByLabelText('Observations'),
+      'The package makes an environmental claim without identifying a source.',
+    )
+    await user.click(screen.getByRole('button', { name: 'Publish unverified report' }))
+
+    expect(
+      await screen.findByText('Your report was published as unverified community content.'),
+    ).toBeInTheDocument()
+    const submitted = fetchMock.mock.calls.find(([input]) => input.toString().includes('/consumer/reports'))
+    expect(submitted).toBeDefined()
+    const submittedBody = submitted?.[1]?.body
+    expect(submittedBody).toBeInstanceOf(FormData)
+    if (!(submittedBody instanceof FormData)) throw new Error('Expected multipart form data.')
+    expect(submittedBody.get('category')).toBe('beverages')
+  })
+
+  it('shows public unverified reports and their supporting material', async () => {
+    window.history.pushState({}, '', '/community-reports')
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      total: 1,
+      disclaimer: 'These reports are user-submitted and unverified.',
+      items: [{
+        id: 'f42f350b-a83d-4c43-81bd-b476800a54e8',
+        product_name: 'Example drink',
+        barcode: '7891000100103',
+        category: 'beverages',
+        assessments: [{ dimension: 'environmental_impact', outcome: 'negative' }],
+        observations: 'The environmental claim does not identify a supporting study.',
+        evidence_url: 'https://example.org/source',
+        photo_url: '/api/v1/consumer/reports/f42f350b-a83d-4c43-81bd-b476800a54e8/photo',
+        documents: [{
+          id: 'a5c0cdde-3f0d-4979-8233-1b312f4dc1ac',
+          file_name: 'evidence.pdf',
+          mime_type: 'application/pdf',
+          download_url: '/api/v1/consumer/reports/f42f350b-a83d-4c43-81bd-b476800a54e8/documents/a5c0cdde-3f0d-4979-8233-1b312f4dc1ac',
+        }],
+        status: 'published_unverified',
+        published_at: '2026-09-28T20:00:00Z',
+      }],
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderApp()
+    const user = userEvent.setup()
+
+    expect(await screen.findByRole('heading', { name: 'Example drink' })).toBeInTheDocument()
+    expect(screen.getByText(/does not identify a supporting study/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Is this product sustainable?: No')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Download evidence.pdf' })).toBeInTheDocument()
+    expect(screen.getByText('Unverified community content')).toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('Filter reports by category'), 'beverages')
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('category=beverages'),
+        expect.anything(),
+      )
+    })
   })
 })

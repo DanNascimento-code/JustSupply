@@ -1,14 +1,22 @@
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
 from justsupply.dependencies import get_consumer_research_service
 from justsupply.integrations.open_food_facts import CatalogProduct, CatalogUnavailableError
 from justsupply.main import app
-from justsupply.repositories.consumer_evidence import EvidencePersistenceError
+from justsupply.repositories.consumer_evidence import (
+    EvidencePersistenceError,
+    StoredCommunitySearchProduct,
+)
 from justsupply.schemas.consumer import (
+    AssessmentDimension,
+    CommunityReportOutcomeCounts,
+    CommunityReportSummary,
     ConsumerAnswerResponse,
     ConsumerProductRead,
+    FoodCategory,
     ProductResearchResponse,
     UserLocale,
 )
@@ -18,6 +26,7 @@ def catalog_product(
     *,
     vegan_tag: str = "en:vegan",
     environmental_grade: str | None = "b",
+    ingredients_text: str | None = None,
 ) -> CatalogProduct:
     return CatalogProduct(
         barcode="7891000100103",
@@ -28,6 +37,7 @@ def catalog_product(
         environmental_score_grade=environmental_grade,
         last_updated_at=datetime(2026, 9, 14, 12, 0, tzinfo=UTC),
         source_url="https://world.openfoodfacts.org/product/7891000100103",
+        ingredients_text=ingredients_text,
     )
 
 
@@ -74,10 +84,80 @@ def test_text_search_preserves_query_and_concerns(
     assert payload["items"][0]["assessments"][1]["status"] == "concern"
 
 
+def test_ingredient_fallback_detects_animal_derived_content(
+    client: TestClient,
+    consumer_catalog: object,
+) -> None:
+    consumer_catalog.products = [  # type: ignore[attr-defined]
+        catalog_product(vegan_tag="en:vegan-status-unknown", ingredients_text="Cocoa, milk, sugar")
+    ]
+
+    response = client.get("/api/v1/consumer/products", params={"query": "milk chocolate"})
+
+    assessment = response.json()["items"][0]["assessments"][0]
+    assert assessment["status"] == "concern"
+    assert "milk" in assessment["finding"]
+
+
+def test_catalog_search_is_reused_from_database_cache(
+    client: TestClient,
+    consumer_catalog: object,
+) -> None:
+    consumer_catalog.products = [catalog_product()]  # type: ignore[attr-defined]
+
+    first = client.get("/api/v1/consumer/products", params={"query": "Example"})
+    consumer_catalog.products = []  # type: ignore[attr-defined]
+    second = client.get("/api/v1/consumer/products", params={"query": "Example"})
+
+    assert first.status_code == 200
+    assert second.json()["total"] == 1
+    assert consumer_catalog.queries == ["Example"]  # type: ignore[attr-defined]
+
+
 def test_empty_search_result(client: TestClient) -> None:
     response = client.get("/api/v1/consumer/products", params={"query": "unknown product"})
     assert response.status_code == 200
     assert response.json()["items"] == []
+
+
+def test_main_search_includes_community_only_product(
+    client: TestClient,
+    consumer_evidence_repository: object,
+) -> None:
+    consumer_evidence_repository.community_search_products = [  # type: ignore[attr-defined]
+        StoredCommunitySearchProduct(
+            report_id=uuid4(),
+            product_name="Community oat yogurt",
+            barcode=None,
+            category=FoodCategory.YOGURT,
+            has_photo=True,
+            published_at=datetime(2026, 9, 28, 12, 0, tzinfo=UTC),
+            summary=CommunityReportSummary(
+                total=2,
+                assessment_counts={
+                    AssessmentDimension.VEGAN_COMPOSITION: CommunityReportOutcomeCounts(
+                        positive=2,
+                        negative=0,
+                    )
+                },
+            ),
+        )
+    ]
+
+    response = client.get(
+        "/api/v1/consumer/products",
+        params={"query": "Community oat yogurt"},
+    )
+
+    assert response.status_code == 200
+    product = response.json()["items"][0]
+    assert product["name"] == "Community oat yogurt"
+    assert product["catalog_product"] is False
+    assert product["category"] == "yogurt"
+    assert product["community_reports"]["assessment_counts"]["vegan_composition"] == {
+        "positive": 2,
+        "negative": 0,
+    }
 
 
 def test_catalog_failure_becomes_bad_gateway(
@@ -103,6 +183,90 @@ def test_persistence_failure_becomes_service_unavailable(
 def test_rejects_short_query(client: TestClient) -> None:
     response = client.get("/api/v1/consumer/products", params={"query": "a"})
     assert response.status_code == 422
+
+
+def test_accepts_unverified_community_report(
+    client: TestClient,
+    consumer_evidence_repository: object,
+) -> None:
+    response = client.post(
+        "/api/v1/consumer/reports",
+        data={
+            "product_name": "Example drink",
+            "barcode": "7891000100103",
+            "category": "beverages",
+            "vegan_composition": "negative",
+            "environmental_impact": "positive",
+            "details": "The label lists an ingredient that should be independently reviewed.",
+            "evidence_url": "https://example.org/product-source",
+        },
+        files=[
+            ("photo", ("product.png", b"\x89PNG\r\n\x1a\ncontent", "image/png")),
+            (
+                "documents",
+                ("evidence.pdf", b"%PDF-1.7\ncontent", "application/pdf"),
+            ),
+        ],
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["status"] == "published_unverified"
+    assert payload["has_photo"] is True
+    assert payload["document_count"] == 1
+    assert payload["category"] == "beverages"
+    assert payload["assessments"] == [
+        {"dimension": "vegan_composition", "outcome": "negative"},
+        {"dimension": "environmental_impact", "outcome": "positive"},
+    ]
+    assert len(consumer_evidence_repository.community_reports) == 1  # type: ignore[attr-defined]
+
+    listing = client.get(
+        "/api/v1/consumer/reports",
+        params={"barcode": "7891000100103", "category": "beverages"},
+    )
+    assert listing.status_code == 200
+    public_report = listing.json()["items"][0]
+    assert public_report["observations"].startswith("The label lists")
+    assert public_report["status"] == "published_unverified"
+    assert public_report["category"] == "beverages"
+    assert public_report["assessments"] == payload["assessments"]
+    assert public_report["photo_url"] is not None
+    assert public_report["documents"][0]["file_name"] == "evidence.pdf"
+
+    photo = client.get(public_report["photo_url"])
+    document = client.get(public_report["documents"][0]["download_url"])
+    assert photo.status_code == 200
+    assert photo.headers["content-type"] == "image/png"
+    assert document.status_code == 200
+    assert "attachment" in document.headers["content-disposition"]
+    mismatched_category = client.get(
+        "/api/v1/consumer/reports",
+        params={"category": "ice_cream"},
+    )
+    assert mismatched_category.json()["total"] == 0
+
+
+def test_community_report_requires_identity_and_assessment(client: TestClient) -> None:
+    missing_identity = client.post(
+        "/api/v1/consumer/reports",
+        data={
+            "vegan_composition": "positive",
+            "category": "beverages",
+            "details": "This report has enough explanatory detail.",
+        },
+    )
+    missing_assessment = client.post(
+        "/api/v1/consumer/reports",
+        data={
+            "product_name": "Example drink",
+            "category": "beverages",
+            "details": "This report has enough explanatory detail.",
+        },
+    )
+
+    assert missing_identity.status_code == 422
+    assert missing_assessment.status_code == 422
 
 
 class StubResearchService:
@@ -143,6 +307,20 @@ class StubResearchService:
             prompt_version="consumer-evidence-rag-v1",
         )
 
+    def research_label(
+        self,
+        barcode: str,
+        image_data: bytes,
+        mime_type: str,
+        *,
+        language: UserLocale,
+    ) -> ProductResearchResponse:
+        assert barcode == self.product.barcode
+        assert image_data.startswith(b"\x89PNG")
+        assert mime_type == "image/png"
+        assert language == UserLocale.ENGLISH
+        return ProductResearchResponse(product=self.product, cached=False)
+
 
 def test_research_and_question_routes(
     client: TestClient,
@@ -158,6 +336,10 @@ def test_research_and_question_routes(
             f"/api/v1/consumer/products/{product.barcode}/ask",
             json={"question": "Is the available evidence sufficient?", "top_k": 4},
         )
+        label = client.post(
+            f"/api/v1/consumer/products/{product.barcode}/research-label",
+            files={"image": ("label.png", b"\x89PNG\r\n\x1a\ncontent", "image/png")},
+        )
     finally:
         app.dependency_overrides.pop(get_consumer_research_service, None)
 
@@ -165,6 +347,26 @@ def test_research_and_question_routes(
     assert research.json()["cached"] is False
     assert answer.status_code == 200
     assert answer.json()["insufficient_evidence"] is True
+    assert label.status_code == 200
+
+
+def test_rejects_invalid_label_upload(
+    client: TestClient,
+    consumer_catalog: object,
+) -> None:
+    consumer_catalog.products = [catalog_product()]  # type: ignore[attr-defined]
+    search = client.get("/api/v1/consumer/products", params={"query": "7891000100103"})
+    product = ConsumerProductRead.model_validate(search.json()["items"][0])
+    app.dependency_overrides[get_consumer_research_service] = lambda: StubResearchService(product)
+    try:
+        response = client.post(
+            f"/api/v1/consumer/products/{product.barcode}/research-label",
+            files={"image": ("label.png", b"not-an-image", "image/png")},
+        )
+    finally:
+        app.dependency_overrides.pop(get_consumer_research_service, None)
+
+    assert response.status_code == 422
 
 
 def test_search_can_return_brazilian_portuguese_catalog_assessments(

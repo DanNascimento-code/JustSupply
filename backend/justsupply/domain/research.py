@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from justsupply.schemas.consumer import AiResearchAssessment
+from justsupply.schemas.consumer import AiResearchAssessment, OrganizationResolution
 
 
 @dataclass(frozen=True)
@@ -12,6 +12,20 @@ class GroundedWebSource:
     provider_name: str
     url: str
     cited_text: str
+    focus: str = "general"
+    source_class: str = "unclassified"
+
+
+@dataclass(frozen=True)
+class PublicWebSearchResult:
+    provider_response_id: str | None
+    sources: list[GroundedWebSource]
+
+
+@dataclass(frozen=True)
+class OrganizationLookup:
+    names: tuple[str, ...]
+    source: GroundedWebSource | None = None
 
 
 @dataclass(frozen=True)
@@ -20,6 +34,7 @@ class AiResearchResult:
     searched_at: datetime
     sources: list[GroundedWebSource]
     assessments: list[AiResearchAssessment]
+    organization: OrganizationResolution | None = None
 
 
 @dataclass(frozen=True)
