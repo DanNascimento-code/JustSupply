@@ -125,9 +125,7 @@ class FakeConsumerEvidenceRepository:
                 category=report.category,
                 assessments=tuple(report.assessments),
                 observations=report.details,
-                evidence_url=(
-                    str(report.evidence_url) if report.evidence_url is not None else None
-                ),
+                evidence_urls=tuple(str(url) for url in report.evidence_urls),
                 has_photo=photo_data is not None,
                 documents=attachments,
                 published_at=submitted_at,

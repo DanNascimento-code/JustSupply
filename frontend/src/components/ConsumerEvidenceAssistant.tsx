@@ -7,13 +7,13 @@ import { useI18n } from '../i18n'
 interface ConsumerEvidenceAssistantProps {
   barcode: string
   productName: string
-  enabled: boolean
+  researching: boolean
 }
 
 export function ConsumerEvidenceAssistant({
   barcode,
   productName,
-  enabled,
+  researching,
 }: ConsumerEvidenceAssistantProps) {
   const { language, t } = useI18n()
   const [question, setQuestion] = useState('')
@@ -43,15 +43,13 @@ export function ConsumerEvidenceAssistant({
             minLength={3}
             maxLength={500}
             value={question}
-            disabled={!enabled || answerMutation.isPending}
+            disabled={researching || answerMutation.isPending}
             onChange={(event) => setQuestion(event.target.value)}
             placeholder={
-              enabled
-                ? t('questionPlaceholder')
-                : t('researchFirst')
+              researching ? t('researchFirst') : t('questionPlaceholder')
             }
           />
-          <button type="submit" disabled={!enabled || answerMutation.isPending}>
+          <button type="submit" disabled={researching || answerMutation.isPending}>
             {answerMutation.isPending ? t('checking') : t('ask')}
           </button>
         </div>
@@ -74,7 +72,7 @@ export function ConsumerEvidenceAssistant({
               rel="noreferrer"
               key={citation.evidence_id}
             >
-              [{citation.number}] {citation.title} · {t('match', { value: Math.round(citation.similarity * 100) })}
+              [{citation.number}] {citation.title}
             </a>
           ))}
         </div>

@@ -114,12 +114,23 @@ class CommunityReportModel(Base):
     barcode: Mapped[str | None] = mapped_column(String(14), nullable=True)
     category: Mapped[str] = mapped_column(String(50), nullable=False)
     details: Mapped[str] = mapped_column(Text, nullable=False)
-    evidence_url: Mapped[str | None] = mapped_column(String(2083), nullable=True)
     photo_mime_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
     photo_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     status: Mapped[str] = mapped_column(String(30), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CommunityReportSourceModel(Base):
+    __tablename__ = "community_report_sources"
+
+    report_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("community_reports.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    url: Mapped[str] = mapped_column(String(2083), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class CommunityReportAssessmentModel(Base):

@@ -50,6 +50,7 @@ MAX_LABEL_IMAGE_BYTES = 4_000_000
 LABEL_IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_REPORT_DOCUMENTS = 3
 MAX_REPORT_DOCUMENT_BYTES = 8_000_000
+MAX_REPORT_SOURCE_LINKS = 5
 REPORT_DOCUMENT_MIME_TYPES = {
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -100,6 +101,7 @@ def submit_community_report(
         str | None,
         Form(pattern=r"^\d{8,14}$"),
     ] = None,
+    evidence_urls: Annotated[list[HttpUrl] | None, Form()] = None,
     evidence_url: Annotated[HttpUrl | None, Form()] = None,
     vegan_composition: Annotated[CommunityReportOutcome | None, Form()] = None,
     environmental_impact: Annotated[CommunityReportOutcome | None, Form()] = None,
@@ -129,6 +131,17 @@ def submit_community_report(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Report a positive or negative outcome for at least one dimension.",
+        )
+    submitted_urls = list(
+        {
+            str(url): url
+            for url in [*(evidence_urls or []), *([evidence_url] if evidence_url else [])]
+        }.values()
+    )
+    if len(submitted_urls) > MAX_REPORT_SOURCE_LINKS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Add no more than {MAX_REPORT_SOURCE_LINKS} supporting source links.",
         )
     photo_data: bytes | None = None
     photo_mime_type: str | None = None
@@ -187,7 +200,7 @@ def submit_community_report(
                 category=category,
                 assessments=assessments,
                 details=details,
-                evidence_url=evidence_url,
+                evidence_urls=submitted_urls,
             ),
             photo_data=photo_data,
             photo_mime_type=photo_mime_type,
@@ -351,9 +364,11 @@ def ask_product_question(
             top_k=payload.top_k,
             language=payload.language,
         )
-    except ProductNotFoundError as error:
+    except (ProductNotFoundError, ConsumerProductNotFoundError) as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    except AiResearchError as error:
+    except CatalogUnavailableError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+    except (AiResearchError, EvidencePersistenceError) as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(error),

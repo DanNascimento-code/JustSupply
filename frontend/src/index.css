@@ -877,6 +877,43 @@ footer span:first-child {
   gap: 14px;
 }
 
+.report-source-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.report-source-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.report-source-row button,
+.add-source-link {
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  color: var(--forest);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.add-source-link {
+  justify-self: start;
+}
+
+.add-source-link:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .report-assessment-option {
   display: grid;
   gap: 10px;

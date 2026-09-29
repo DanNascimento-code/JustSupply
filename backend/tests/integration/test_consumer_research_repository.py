@@ -208,6 +208,10 @@ def test_research_is_persisted_and_retrieved_by_vector_similarity() -> None:
                     ),
                 ],
                 details="The package claim should be independently reviewed.",
+                evidence_urls=[
+                    "https://example.org/source-one",
+                    "https://news.example.org/source-two",
+                ],
             ),
             photo_data=b"\x89PNG\r\n\x1a\nreport",
             photo_mime_type="image/png",
@@ -251,6 +255,10 @@ def test_research_is_persisted_and_retrieved_by_vector_similarity() -> None:
         assert public_reports[0].observations.startswith("The package claim")
         assert public_reports[0].has_photo is True
         assert public_reports[0].category == FoodCategory.SNACKS_CHIPS
+        assert public_reports[0].evidence_urls == (
+            "https://example.org/source-one",
+            "https://news.example.org/source-two",
+        )
         assert repository.list_public_community_reports(
             category=FoodCategory.ICE_CREAM
         ) == []

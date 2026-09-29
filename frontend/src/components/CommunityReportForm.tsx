@@ -18,7 +18,7 @@ export function CommunityReportForm() {
   const [barcode, setBarcode] = useState('')
   const [category, setCategory] = useState<FoodCategory | ''>('')
   const [details, setDetails] = useState('')
-  const [evidenceUrl, setEvidenceUrl] = useState('')
+  const [evidenceUrls, setEvidenceUrls] = useState([''])
   const [photo, setPhoto] = useState<File | null>(null)
   const [documents, setDocuments] = useState<File[]>([])
   const [assessments, setAssessments] = useState<Partial<Record<AssessmentDimension, CommunityReportOutcome>>>({})
@@ -30,7 +30,7 @@ export function CommunityReportForm() {
       setBarcode('')
       setCategory('')
       setDetails('')
-      setEvidenceUrl('')
+      setEvidenceUrls([''])
       setPhoto(null)
       setDocuments([])
       setAssessments({})
@@ -62,7 +62,9 @@ export function CommunityReportForm() {
     if (barcode.trim()) form.append('barcode', barcode.trim())
     form.append('category', category)
     form.append('details', details.trim())
-    if (evidenceUrl.trim()) form.append('evidence_url', evidenceUrl.trim())
+    Array.from(new Set(evidenceUrls.map((url) => url.trim()).filter(Boolean))).forEach((url) => {
+      form.append('evidence_urls', url)
+    })
     if (photo) form.append('photo', photo)
     documents.forEach((document) => form.append('documents', document))
     Object.entries(assessments).forEach(([dimension, outcome]) => {
@@ -169,15 +171,43 @@ export function CommunityReportForm() {
         </label>
 
         <div className="report-identity-grid">
-          <label>
-            {t('reportSourceUrl')}
-            <input
-              type="url"
-              value={evidenceUrl}
-              onChange={(event) => setEvidenceUrl(event.target.value)}
-              placeholder="https://"
-            />
-          </label>
+          <div className="report-source-list">
+            <span>{t('reportSourceUrl')}</span>
+            {evidenceUrls.map((url, index) => (
+              <div className="report-source-row" key={index}>
+                <input
+                  aria-label={`${t('reportSourceUrl')} ${index + 1}`}
+                  type="url"
+                  value={url}
+                  onChange={(event) => setEvidenceUrls((current) =>
+                    current.map((item, itemIndex) =>
+                      itemIndex === index ? event.target.value : item,
+                    ))}
+                  placeholder="https://"
+                />
+                {evidenceUrls.length > 1 ? (
+                  <button
+                    type="button"
+                    aria-label={`${t('removeSourceLink')} ${index + 1}`}
+                    onClick={() => setEvidenceUrls((current) =>
+                      current.filter((_, itemIndex) => itemIndex !== index),
+                    )}
+                  >
+                    {t('removeSourceLink')}
+                  </button>
+                ) : null}
+              </div>
+            ))}
+            <button
+              className="add-source-link"
+              type="button"
+              disabled={evidenceUrls.length >= 5}
+              onClick={() => setEvidenceUrls((current) => [...current, ''])}
+            >
+              {t('addSourceLink')}
+            </button>
+            <small>{t('reportSourceHelp')}</small>
+          </div>
           <label>
             {t('reportPhoto')}
             <input

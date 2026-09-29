@@ -117,7 +117,6 @@ export function ConsumerSearchPage() {
         {searchMutation.isError ? (
           <div className="consumer-state error-state" role="alert">
             <strong>{t('searchFailed')}</strong>
-            {searchMutation.error instanceof Error ? <p>{searchMutation.error.message}</p> : null}
           </div>
         ) : null}
 

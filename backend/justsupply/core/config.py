@@ -23,11 +23,19 @@ class Settings(BaseSettings):
         "JustSupply/0.1 (https://github.com/DanNascimento-code/JustSupply)"
     )
     open_food_facts_timeout_seconds: float = 8.0
+    usda_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("JUSTSUPPLY_USDA_API_KEY", "USDA_API_KEY"),
+    )
+    usda_base_url: str = "https://api.nal.usda.gov/fdc/v1"
+    usda_timeout_seconds: float = 8.0
     gemini_api_key: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices("JUSTSUPPLY_GEMINI_API_KEY", "GEMINI_API_KEY"),
     )
-    gemini_model: str = "gemini-3.1-flash-lite"
+    gemini_model: str = "gemini-3.5-flash-lite"
+    gemini_search_model: str = "gemini-3.5-flash-lite"
+    google_grounding_enabled: bool = False
     gemini_embedding_model: str = "gemini-embedding-2"
     gemini_embedding_dimensions: Literal[1536] = 1536
     gemini_timeout_seconds: float = 20.0

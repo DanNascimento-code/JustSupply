@@ -10,18 +10,23 @@ from justsupply.integrations.ai import (
     AiResearcher,
     ConsumerAnswerGenerator,
     EmbeddingProvider,
+    PublicWebSearchProvider,
     UnavailableAnswerGenerator,
     UnavailableEmbeddingProvider,
     UnavailableResearcher,
 )
+from justsupply.integrations.composite_catalog import FallbackProductCatalog
+from justsupply.integrations.composite_search import CompositeWebSearch
 from justsupply.integrations.gemini import (
     GeminiConsumerAnswerGenerator,
     GeminiEmbeddingProvider,
     GeminiEvidenceResearcher,
 )
+from justsupply.integrations.google_grounding import GoogleGroundedSearch
 from justsupply.integrations.langchain_rag import LangChainConsumerRag
 from justsupply.integrations.open_food_facts import OpenFoodFactsCatalog
 from justsupply.integrations.tavily import TavilyWebSearch
+from justsupply.integrations.usda_food_data import UsdaFoodDataCatalog
 from justsupply.integrations.wikidata import WikidataOrganizationResolver
 from justsupply.repositories.consumer_evidence import SqlAlchemyConsumerEvidenceRepository
 from justsupply.services.consumer import ConsumerResearchService, ConsumerService
@@ -55,14 +60,24 @@ def get_consumer_research_service(
     researcher: AiResearcher
     embedding_provider: EmbeddingProvider
     answer_generator: ConsumerAnswerGenerator
-    search_provider: TavilyWebSearch | None = None
+    google_search: GoogleGroundedSearch | None = None
+    tavily_search: TavilyWebSearch | None = None
     organization_resolver: WikidataOrganizationResolver | None = None
     if gemini_key:
-        search_provider = TavilyWebSearch(
+        search_providers: list[PublicWebSearchProvider] = []
+        if settings.google_grounding_enabled:
+            google_search = GoogleGroundedSearch(
+                gemini_key,
+                settings.gemini_search_model,
+                settings.gemini_timeout_seconds,
+            )
+            search_providers.append(google_search)
+        tavily_search = TavilyWebSearch(
             tavily_key or None,
             settings.tavily_base_url,
             settings.tavily_timeout_seconds,
         )
+        search_providers.append(tavily_search)
         organization_resolver = WikidataOrganizationResolver(
             settings.wikidata_base_url,
             settings.open_food_facts_user_agent,
@@ -71,7 +86,7 @@ def get_consumer_research_service(
         researcher = GeminiEvidenceResearcher(
             gemini_key,
             settings.gemini_model,
-            search_provider,
+            CompositeWebSearch(search_providers),
             settings.gemini_timeout_seconds,
             organization_resolver=organization_resolver,
         )
@@ -110,17 +125,28 @@ def get_consumer_research_service(
             catalog_cache_ttl_hours=settings.catalog_cache_ttl_hours,
         )
     finally:
-        if search_provider is not None:
-            search_provider.close()
+        if tavily_search is not None:
+            tavily_search.close()
         if organization_resolver is not None:
             organization_resolver.close()
         catalog.close()
 
 
-def _catalog() -> OpenFoodFactsCatalog:
+def _catalog() -> FallbackProductCatalog:
     settings = get_settings()
-    return OpenFoodFactsCatalog(
+    open_food_facts = OpenFoodFactsCatalog(
         base_url=settings.open_food_facts_base_url,
         user_agent=settings.open_food_facts_user_agent,
         timeout_seconds=settings.open_food_facts_timeout_seconds,
     )
+    usda_key = settings.usda_api_key.get_secret_value() if settings.usda_api_key else ""
+    usda = (
+        UsdaFoodDataCatalog(
+            usda_key,
+            settings.usda_base_url,
+            settings.usda_timeout_seconds,
+        )
+        if usda_key
+        else None
+    )
+    return FallbackProductCatalog(open_food_facts, usda)

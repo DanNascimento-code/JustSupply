@@ -29,6 +29,7 @@ from justsupply.integrations.ai import (
 from justsupply.schemas.consumer import (
     AiResearchAssessment,
     AiResearchSynthesis,
+    AiResearchTranslations,
     AssessmentDimension,
     AssessmentStatus,
     GroundedAnswerOutput,
@@ -86,6 +87,7 @@ class GeminiEvidenceResearcher:
                 brand,
                 barcode,
                 organization_lookup.names,
+                organization_lookup.jurisdiction,
             )
             sources = list(search_result.sources)
             if organization_lookup.source is not None:
@@ -135,7 +137,7 @@ class GeminiEvidenceResearcher:
                 ),
             )
             synthesis = _validate_response(synthesis_response, AiResearchSynthesis)
-            assessments = _validate_assessments(synthesis.assessments, len(sources))
+            assessments = _validate_assessments(synthesis.assessments, sources)
             organization = _validate_organization(synthesis.organization, len(sources))
         except errors.APIError as error:
             raise _gemini_error("research synthesis", error) from error
@@ -263,7 +265,7 @@ class GeminiConsumerAnswerGenerator:
 
 def _validate_assessments(
     assessments: list[AiResearchAssessment],
-    source_count: int,
+    sources: list[GroundedWebSource],
 ) -> list[AiResearchAssessment]:
     expected = set(AssessmentDimension)
     if {item.dimension for item in assessments} != expected:
@@ -271,9 +273,22 @@ def _validate_assessments(
     validated: list[AiResearchAssessment] = []
     for item in assessments:
         source_numbers = list(
-            dict.fromkeys(number for number in item.source_numbers if 1 <= number <= source_count)
+            dict.fromkeys(number for number in item.source_numbers if 1 <= number <= len(sources))
         )
         update: dict[str, object] = {"source_numbers": source_numbers}
+        if not source_numbers and item.dimension in {
+            AssessmentDimension.WOMEN_WORKERS,
+            AssessmentDimension.MINORITY_INCLUSION,
+        }:
+            relevant_numbers = [
+                source.number
+                for source in sources
+                if item.dimension.value in {part.strip() for part in source.focus.split(",")}
+            ][:8]
+            if relevant_numbers:
+                update.update(_social_review_update(relevant_numbers))
+                validated.append(item.model_copy(update=update))
+                continue
         if not source_numbers and item.status in {
             AssessmentStatus.SUPPORTED,
             AssessmentStatus.MIXED,
@@ -300,6 +315,45 @@ def _validate_assessments(
             )
         validated.append(item.model_copy(update=update))
     return validated
+
+
+def _social_review_update(source_numbers: list[int]) -> dict[str, object]:
+    return {
+        "status": AssessmentStatus.UNKNOWN,
+        "source_numbers": source_numbers,
+        "finding": (
+            "Relevant public coverage was found, but it is not sufficient for a confirmed "
+            "conclusion. Review the linked sources."
+        ),
+        "limitations": (
+            "Journalism and partial public disclosures may describe policies, reported events, "
+            "or allegations; they are not equivalent to audited workforce data."
+        ),
+        "translations": AiResearchTranslations(
+            pt_br=LocalizedAssessmentText(
+                finding=(
+                    "Foram encontradas fontes públicas relevantes, mas elas não são suficientes "
+                    "para uma conclusão confirmada. Consulte as fontes vinculadas."
+                ),
+                limitations=(
+                    "Conteúdo jornalístico e divulgações públicas parciais podem descrever "
+                    "políticas, fatos reportados ou alegações; não equivalem a dados auditados "
+                    "sobre a força de trabalho."
+                ),
+            ),
+            es_latam=LocalizedAssessmentText(
+                finding=(
+                    "Se encontraron fuentes públicas relevantes, pero no son suficientes para "
+                    "una conclusión confirmada. Consulta las fuentes vinculadas."
+                ),
+                limitations=(
+                    "El contenido periodístico y las divulgaciones públicas parciales pueden "
+                    "describir políticas, hechos reportados o alegaciones; no equivalen a datos "
+                    "auditados sobre la fuerza laboral."
+                ),
+            ),
+        ),
+    }
 
 
 def _validate_organization(

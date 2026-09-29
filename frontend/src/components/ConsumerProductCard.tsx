@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
-import { useRef, useState, type ChangeEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { API_BASE_URL } from '../api/client'
 import { researchConsumerLabel, researchConsumerProduct } from '../api/consumer'
@@ -11,6 +11,17 @@ import { ConsumerEvidenceAssistant } from './ConsumerEvidenceAssistant'
 
 interface ConsumerProductCardProps {
   product: ConsumerProduct
+}
+
+let automaticResearchQueue: Promise<void> = Promise.resolve()
+
+function enqueueAutomaticResearch<T>(operation: () => Promise<T>): Promise<T> {
+  const result = automaticResearchQueue.then(operation, operation)
+  automaticResearchQueue = result.then(
+    () => undefined,
+    () => undefined,
+  )
+  return result
 }
 
 const communityDimensionKeys: Record<AssessmentDimension, 'communityDimension_vegan_composition' | 'communityDimension_environmental_impact' | 'communityDimension_women_workers' | 'communityDimension_minority_inclusion'> = {
@@ -41,12 +52,25 @@ export function ConsumerProductCard({ product: initialProduct }: ConsumerProduct
   const [product, setProduct] = useState(initialProduct)
   const labelInput = useRef<HTMLInputElement>(null)
   const researchMutation = useMutation({
-    mutationFn: (refresh: boolean) => {
-      if (!product.barcode) throw new Error(t('researchRequiresBarcode'))
-      return researchConsumerProduct(product.barcode, language, refresh)
+    mutationFn: () => {
+      const barcode = product.barcode
+      if (!barcode) throw new Error(t('researchRequiresBarcode'))
+      return enqueueAutomaticResearch(() =>
+        researchConsumerProduct(barcode, language, false),
+      )
     },
     onSuccess: (response) => setProduct(response.product),
   })
+  const automaticResearchKey = useRef<string | null>(null)
+  const startResearch = researchMutation.mutate
+
+  useEffect(() => {
+    if (!product.catalog_product || !product.barcode) return
+    const key = `${product.barcode}:${language}`
+    if (automaticResearchKey.current === key) return
+    automaticResearchKey.current = key
+    startResearch()
+  }, [language, product.barcode, product.catalog_product, startResearch])
   const labelMutation = useMutation({
     mutationFn: (image: File) => {
       if (!product.barcode) throw new Error(t('researchRequiresBarcode'))
@@ -110,7 +134,9 @@ export function ConsumerProductCard({ product: initialProduct }: ConsumerProduct
         <div>
           <p className="section-kicker">{t('aiResearch')}</p>
           <strong>
-            {product.research
+            {researchMutation.isPending
+              ? t('researching')
+              : product.research
               ? t('sourcesResearched', { count: product.research.source_count })
               : t('researchPrompt')}
           </strong>
@@ -133,18 +159,6 @@ export function ConsumerProductCard({ product: initialProduct }: ConsumerProduct
           ) : null}
         </div>
         <div className="research-actions">
-          <button
-            type="button"
-            className="primary-button"
-            disabled={researchMutation.isPending || labelMutation.isPending}
-            onClick={() => researchMutation.mutate(Boolean(product.research))}
-          >
-            {researchMutation.isPending
-              ? t('researching')
-              : product.research
-                ? t('refreshResearch')
-                : t('researchGemini')}
-          </button>
           <label className={`label-upload-button ${labelMutation.isPending ? 'is-disabled' : ''}`}>
             {labelMutation.isPending ? t('analyzingLabel') : t('analyzeLabelPhoto')}
             <input
@@ -157,13 +171,7 @@ export function ConsumerProductCard({ product: initialProduct }: ConsumerProduct
           </label>
         </div>
         {researchMutation.isError || labelMutation.isError ? (
-          <p className="form-error" role="alert">
-            {labelMutation.error instanceof Error
-              ? labelMutation.error.message
-              : researchMutation.error instanceof Error
-              ? researchMutation.error.message
-              : t('researchFailed')}
-          </p>
+          <p className="form-error" role="alert">{t('researchFailed')}</p>
         ) : null}
       </div> : null}
 
@@ -197,7 +205,7 @@ export function ConsumerProductCard({ product: initialProduct }: ConsumerProduct
         <ConsumerEvidenceAssistant
           barcode={product.barcode}
           productName={product.name}
-          enabled={product.research !== null}
+          researching={researchMutation.isPending}
         />
       ) : null}
 

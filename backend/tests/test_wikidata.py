@@ -41,6 +41,7 @@ def test_wikidata_resolves_brand_owner_and_manufacturer() -> None:
                         "claims": {
                             "P127": [_statement("Q2")],
                             "P176": [_statement("Q3")],
+                            "P17": [_statement("Q4")],
                         }
                     }
                 }
@@ -49,6 +50,7 @@ def test_wikidata_resolves_brand_owner_and_manufacturer() -> None:
                 "entities": {
                     "Q2": {"labels": {"en": {"value": "Example Holdings"}}},
                     "Q3": {"labels": {"en": {"value": "Example Foods"}}},
+                    "Q4": {"labels": {"en": {"value": "United Kingdom"}}},
                 }
             },
         ]
@@ -66,11 +68,12 @@ def test_wikidata_resolves_brand_owner_and_manufacturer() -> None:
     assert result.source is not None
     assert result.source.source_class == "public_database"
     assert result.source.url == "https://www.wikidata.org/wiki/Q1"
+    assert result.jurisdiction == "United Kingdom"
     assert client.requests[0][1]["action"] == "wbsearchentities"
 
 
 def test_wikidata_uses_catalog_owner_when_brand_is_unresolved() -> None:
-    client = FakeClient([{"search": []}])
+    client = FakeClient([{"search": []}, {"search": []}, {"search": []}])
     resolver = WikidataOrganizationResolver(
         "https://www.wikidata.org",
         "JustSupply test",
@@ -82,6 +85,58 @@ def test_wikidata_uses_catalog_owner_when_brand_is_unresolved() -> None:
 
     assert result.names == ("Known Owner, Inc.",)
     assert result.source is None
+
+
+def test_wikidata_prefers_local_consumer_company_over_similar_foreign_company() -> None:
+    client = FakeClient(
+        [
+            {
+                "search": [
+                    {
+                        "id": "Q-WRONG",
+                        "label": "Vigor Group",
+                        "description": "energy company",
+                    }
+                ]
+            },
+            {
+                "search": [
+                    {
+                        "id": "Q-RIGHT",
+                        "label": "Vigor S.A.",
+                        "description": "Brazilian dairy company",
+                    }
+                ]
+            },
+            {
+                "entities": {
+                    "Q-RIGHT": {
+                        "claims": {
+                            "P17": [_statement("Q-BRAZIL")],
+                        }
+                    }
+                }
+            },
+            {
+                "entities": {
+                    "Q-BRAZIL": {"labels": {"en": {"value": "Brazil"}}},
+                }
+            },
+        ]
+    )
+    resolver = WikidataOrganizationResolver(
+        "https://www.wikidata.org",
+        "JustSupply test",
+        10,
+        client=client,
+    )
+
+    result = resolver.resolve("Vigor", None)
+
+    assert result.names == ("Vigor S.A.",)
+    assert result.jurisdiction == "Brazil"
+    assert result.source is not None
+    assert result.source.url.endswith("/Q-RIGHT")
 
 
 def _statement(entity_id: str) -> dict[str, Any]:

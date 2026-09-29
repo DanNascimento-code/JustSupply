@@ -8,7 +8,7 @@ from justsupply.domain.research import (
     RetrievedEvidence,
 )
 
-RESEARCH_PROMPT_VERSION = "consumer-entity-aware-social-research-v4"
+RESEARCH_PROMPT_VERSION = "consumer-google-grounded-research-v8"
 ANSWER_PROMPT_VERSION = "consumer-evidence-rag-v1"
 
 SYNTHESIS_INSTRUCTIONS = """
@@ -25,13 +25,21 @@ than marketing claims. For employment dimensions, resolve the brand owner or leg
 sources permit it, state the applicable company and jurisdiction in the finding or limitations, and
 never infer demographic identity from names, photographs, or locations. A policy or equality-index
 score demonstrates a disclosed policy or benchmark result, not workforce representation.
+For women_workers, evaluate three distinct areas whenever evidence permits: representation and
+leadership, pay equity, and equality of opportunity in hiring, promotion, career development, and
+advancement. If a source covers only one area, identify that scope and list the other areas as not
+disclosed instead of generalizing one indicator to the entire dimension.
 Also return an organization resolution when direct sources identify the brand's legal entity,
 parent company, or reporting jurisdiction. Every resolved organization field must be supported by
 at least one listed source number; omit uncertain identity fields instead of guessing.
 Use each source's class when weighing it: government records, certification registries, public
 databases, and independent benchmarks can directly support the facts within their scope; a company
-source supports only what that company disclosed; an independent_or_unclassified source needs
-corroboration for favorable or adverse conclusions. Never treat search-result ranking as proof.
+source supports only what that company disclosed; journalism can support facts attributed to its
+reporting, but a single article is not an audited workforce disclosure and should be presented with
+limited corroboration. If relevant journalism or another public source exists but does not justify a
+confirmed social conclusion, return unknown with those source numbers and tell the user to review
+the coverage. An independent_or_unclassified source needs corroboration for favorable or adverse
+conclusions. Never treat search-result ranking as proof.
 A user_supplied_label can support only text or certification marks visibly present in that image;
 describe illegible or incomplete content as uncertain and do not generalize it to the entire brand.
 """.strip()
@@ -76,6 +84,7 @@ class PublicWebSearchProvider(Protocol):
         brand: str | None,
         barcode: str,
         organization_names: tuple[str, ...] = (),
+        organization_jurisdiction: str | None = None,
     ) -> PublicWebSearchResult: ...
 
 

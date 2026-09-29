@@ -8,12 +8,27 @@ from justsupply.domain.research import GroundedWebSource, OrganizationLookup
 
 _ORGANIZATION_DESCRIPTION_TERMS = {
     "brand",
+    "business",
     "company",
     "corporation",
+    "empresa",
+    "food",
     "manufacturer",
     "organization",
+    "subsidiary",
+}
+_CONSUMER_BUSINESS_TERMS = {"beverage", "consumer", "dairy", "food", "manufacturer", "retail"}
+_NON_ORGANIZATION_TERMS = {
+    "family name",
+    "given name",
+    "software",
+    "video game",
+    "sports club",
+    "person",
 }
 _RELATION_PROPERTIES = ("P127", "P749", "P176")  # owner, parent organization, manufacturer
+_JURISDICTION_PROPERTIES = ("P17", "P495")  # country, country of origin
+_OFFICIAL_NAME_PROPERTY = "P1448"
 
 
 class WikidataOrganizationResolver:
@@ -43,18 +58,31 @@ class WikidataOrganizationResolver:
             if candidate is None:
                 return OrganizationLookup(names=seed_names)
             entity_id, label, description = candidate
-            related_ids = self._related_entity_ids(entity_id)
-            related_names = self._entity_labels(related_ids)
+            related_ids, jurisdiction_ids, official_names = self._entity_details(entity_id)
+            labels = self._entity_labels((*related_ids, *jurisdiction_ids))
+            related_names = tuple(
+                labels[related_id] for related_id in related_ids if related_id in labels
+            )
+            jurisdiction_names = tuple(
+                labels[jurisdiction_id]
+                for jurisdiction_id in jurisdiction_ids
+                if jurisdiction_id in labels
+            )
         except (httpx.HTTPError, KeyError, TypeError, ValueError):
             return OrganizationLookup(names=seed_names)
 
-        names = _unique_names((*seed_names, *related_names))
+        candidate_name = label if _normalize(label) != _normalize(query) else None
+        names = _unique_names(
+            (*seed_names, candidate_name, *official_names, *related_names)
+        )
         if not names:
             return OrganizationLookup(names=())
         relation_text = ", ".join(names)
+        jurisdiction = jurisdiction_names[0] if jurisdiction_names else None
         description_text = f" ({description})" if description else ""
         return OrganizationLookup(
             names=names,
+            jurisdiction=jurisdiction,
             source=GroundedWebSource(
                 number=0,
                 title=f"{label} — Wikidata organization record",
@@ -62,7 +90,9 @@ class WikidataOrganizationResolver:
                 url=f"{self._base_url}/wiki/{entity_id}",
                 cited_text=(
                     f"Wikidata identifies {label}{description_text} and links the entity through "
-                    f"owner, parent-organization, or manufacturer statements to: {relation_text}."
+                    f"owner, parent-organization, manufacturer, or official-name statements "
+                    f"to: {relation_text}. Reporting jurisdiction: "
+                    f"{jurisdiction or 'not stated in the record'}."
                 ),
                 focus="organization",
                 source_class="public_database",
@@ -73,57 +103,58 @@ class WikidataOrganizationResolver:
         self._client.close()
 
     def _find_candidate(self, query: str) -> tuple[str, str, str | None] | None:
-        payload = self._get_json(
-            "/w/api.php",
-            {
-                "action": "wbsearchentities",
-                "search": query,
-                "language": "en",
-                "format": "json",
-                "limit": "5",
-                "type": "item",
-            },
-        )
-        search = payload.get("search")
-        if not isinstance(search, list):
-            return None
-        exact: list[tuple[str, str, str | None]] = []
-        for item in search:
-            if not isinstance(item, Mapping):
-                continue
-            entity_id = item.get("id")
-            label = item.get("label")
-            description = item.get("description")
-            if not isinstance(entity_id, str) or not isinstance(label, str):
-                continue
-            if _normalize(label) != _normalize(query):
-                continue
-            exact.append(
-                (
-                    entity_id,
-                    label,
-                    description if isinstance(description, str) else None,
-                )
+        candidates: list[tuple[int, tuple[str, str, str | None]]] = []
+        query_key = _normalize(query)
+        for language in ("en", "pt", "es"):
+            payload = self._get_json(
+                "/w/api.php",
+                {
+                    "action": "wbsearchentities",
+                    "search": query,
+                    "language": language,
+                    "format": "json",
+                    "limit": "10",
+                    "type": "item",
+                },
             )
-        if not exact:
+            search = payload.get("search")
+            if not isinstance(search, list):
+                continue
+            for item in search:
+                if not isinstance(item, Mapping):
+                    continue
+                entity_id = item.get("id")
+                label = item.get("label")
+                description = item.get("description")
+                if not isinstance(entity_id, str) or not isinstance(label, str):
+                    continue
+                description_text = description if isinstance(description, str) else None
+                score = _candidate_score(label, description_text, query_key)
+                if score < 0:
+                    continue
+                candidate = (entity_id, label, description_text)
+                if candidate not in (existing[1] for existing in candidates):
+                    candidates.append((score, candidate))
+            if candidates and max(score for score, _ in candidates) >= 16:
+                break
+        if not candidates:
             return None
-        for candidate in exact:
-            description = (candidate[2] or "").casefold()
-            if any(term in description for term in _ORGANIZATION_DESCRIPTION_TERMS):
-                return candidate
-        return exact[0]
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return candidates[0][1] if candidates[0][0] >= 15 else None
 
-    def _related_entity_ids(self, entity_id: str) -> tuple[str, ...]:
+    def _entity_details(
+        self, entity_id: str
+    ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
         payload = self._get_json(f"/wiki/Special:EntityData/{entity_id}.json", {})
         entities = payload.get("entities")
         if not isinstance(entities, Mapping):
-            return ()
+            return (), (), ()
         entity = entities.get(entity_id)
         if not isinstance(entity, Mapping):
-            return ()
+            return (), (), ()
         claims = entity.get("claims")
         if not isinstance(claims, Mapping):
-            return ()
+            return (), (), ()
         related: list[str] = []
         for property_id in _RELATION_PROPERTIES:
             statements = claims.get(property_id)
@@ -133,11 +164,27 @@ class WikidataOrganizationResolver:
                 related_id = _statement_entity_id(statement)
                 if related_id and related_id not in related:
                     related.append(related_id)
-        return tuple(related[:5])
+        jurisdictions: list[str] = []
+        for property_id in _JURISDICTION_PROPERTIES:
+            statements = claims.get(property_id)
+            if not isinstance(statements, list):
+                continue
+            for statement in statements:
+                jurisdiction_id = _statement_entity_id(statement)
+                if jurisdiction_id and jurisdiction_id not in jurisdictions:
+                    jurisdictions.append(jurisdiction_id)
+        official_names: list[str] = []
+        statements = claims.get(_OFFICIAL_NAME_PROPERTY)
+        if isinstance(statements, list):
+            for statement in statements:
+                official_name = _statement_text(statement)
+                if official_name and official_name not in official_names:
+                    official_names.append(official_name)
+        return tuple(related[:5]), tuple(jurisdictions[:2]), tuple(official_names[:3])
 
-    def _entity_labels(self, entity_ids: tuple[str, ...]) -> tuple[str, ...]:
+    def _entity_labels(self, entity_ids: tuple[str, ...]) -> dict[str, str]:
         if not entity_ids:
-            return ()
+            return {}
         payload = self._get_json(
             "/w/api.php",
             {
@@ -150,8 +197,8 @@ class WikidataOrganizationResolver:
         )
         entities = payload.get("entities")
         if not isinstance(entities, Mapping):
-            return ()
-        labels: list[str] = []
+            return {}
+        labels: dict[str, str] = {}
         for entity_id in entity_ids:
             entity = entities.get(entity_id)
             if not isinstance(entity, Mapping):
@@ -163,8 +210,8 @@ class WikidataOrganizationResolver:
             if isinstance(english, Mapping):
                 value = english.get("value")
                 if isinstance(value, str) and value.strip():
-                    labels.append(value.strip())
-        return tuple(labels)
+                    labels[entity_id] = value.strip()
+        return labels
 
     def _get_json(self, path: str, params: dict[str, str]) -> dict[str, object]:
         response = self._client.get(path, params=params)
@@ -191,11 +238,69 @@ def _statement_entity_id(statement: object) -> str | None:
     return entity_id if isinstance(entity_id, str) else None
 
 
+def _statement_text(statement: object) -> str | None:
+    if not isinstance(statement, Mapping):
+        return None
+    mainsnak = statement.get("mainsnak")
+    if not isinstance(mainsnak, Mapping):
+        return None
+    datavalue = mainsnak.get("datavalue")
+    if not isinstance(datavalue, Mapping):
+        return None
+    value = datavalue.get("value")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    if isinstance(value, Mapping):
+        text = value.get("text")
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+    return None
+
+
 def _primary_name(names: str | None) -> str | None:
     if names is None:
         return None
     value = names.split(",", maxsplit=1)[0].strip()
     return value or None
+
+
+def _candidate_score(label: str, description: str | None, query_key: str) -> int:
+    label_key = _normalize(label)
+    base_key = _company_base(label)
+    if label_key == query_key:
+        score = 10
+    elif base_key == query_key:
+        score = 8
+    else:
+        return -1
+    description_text = (description or "").casefold()
+    if any(term in description_text for term in _NON_ORGANIZATION_TERMS):
+        return -1
+    if any(term in description_text for term in _ORGANIZATION_DESCRIPTION_TERMS):
+        score += 5
+    if any(term in description_text for term in _CONSUMER_BUSINESS_TERMS):
+        score += 3
+    return score
+
+
+def _company_base(value: str) -> str:
+    key = _normalize(value)
+    suffixes = (
+        "corporation",
+        "company",
+        "limited",
+        "holdings",
+        "holding",
+        "group",
+        "corp",
+        "ltd",
+        "inc",
+        "sa",
+    )
+    for suffix in suffixes:
+        if key.endswith(suffix) and len(key) - len(suffix) >= 3:
+            return key[: -len(suffix)]
+    return key
 
 
 def _unique_names(values: tuple[str | None, ...]) -> tuple[str, ...]:

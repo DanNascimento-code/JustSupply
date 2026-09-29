@@ -1,6 +1,7 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from time import sleep
 from typing import Any, Protocol, cast
 
 import httpx2 as httpx
@@ -37,6 +38,10 @@ class CatalogProduct:
     forest_footprint_attribute: CatalogAttribute | None = None
     ingredients_image_url: str | None = None
     brand_owner: str | None = None
+    source_name: str = "Open Food Facts"
+    ingredients_source_url: str | None = None
+    ingredients_source_name: str | None = None
+    catalog_degraded: bool = False
 
 
 class ProductCatalog(Protocol):
@@ -139,6 +144,9 @@ class OpenFoodFactsCatalog:
     ) -> dict[str, Any]:
         try:
             response = self._client.get(path, params=params)
+            if response.status_code == 503:
+                sleep(0.5)
+                response = self._client.get(path, params=params)
             if allow_not_found and response.status_code == 404:
                 return {}
             response.raise_for_status()

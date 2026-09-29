@@ -99,7 +99,7 @@ class CommunityReportCreate(BaseModel):
         str,
         StringConstraints(strip_whitespace=True, min_length=10, max_length=1500),
     ]
-    evidence_url: HttpUrl | None = None
+    evidence_urls: list[HttpUrl] = Field(default_factory=list, max_length=5)
 
     @model_validator(mode="after")
     def validate_identity(self) -> CommunityReportCreate:
@@ -138,7 +138,7 @@ class PublicCommunityReportRead(BaseModel):
     category: FoodCategory
     assessments: list[CommunityReportAssessment]
     observations: str
-    evidence_url: str | None
+    evidence_urls: list[str]
     photo_url: str | None
     documents: list[CommunityReportAttachmentRead]
     status: Literal["published_unverified"] = "published_unverified"

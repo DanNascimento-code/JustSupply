@@ -120,7 +120,7 @@ export interface PublicCommunityReport {
   category: FoodCategory
   assessments: CommunityReportAssessment[]
   observations: string
-  evidence_url: string | null
+  evidence_urls: string[]
   photo_url: string | null
   documents: CommunityReportAttachment[]
   status: 'published_unverified'

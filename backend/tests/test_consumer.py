@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -20,6 +21,7 @@ from justsupply.schemas.consumer import (
     ProductResearchResponse,
     UserLocale,
 )
+from justsupply.services.consumer import ConsumerResearchService
 
 
 def catalog_product(
@@ -114,6 +116,31 @@ def test_catalog_search_is_reused_from_database_cache(
     assert consumer_catalog.queries == ["Example"]  # type: ignore[attr-defined]
 
 
+def test_degraded_catalog_search_is_not_cached(
+    client: TestClient,
+    consumer_catalog: object,
+) -> None:
+    consumer_catalog.products = [  # type: ignore[attr-defined]
+        replace(
+            catalog_product(environmental_grade=None, ingredients_text="Corn, salt"),
+            source_name="USDA FoodData Central",
+            catalog_degraded=True,
+        )
+    ]
+
+    first = client.get("/api/v1/consumer/products", params={"query": "Example"})
+    second = client.get("/api/v1/consumer/products", params={"query": "Example"})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert consumer_catalog.queries == ["Example", "Example"]  # type: ignore[attr-defined]
+    environmental = first.json()["items"][0]["assessments"][1]
+    assert environmental["verification"] == "unverified"
+    assert environmental["sources"] == []
+    assert "Open Food Facts" in environmental["finding"]
+    assert "USDA FoodData Central" in environmental["verification_note"]
+
+
 def test_empty_search_result(client: TestClient) -> None:
     response = client.get("/api/v1/consumer/products", params={"query": "unknown product"})
     assert response.status_code == 200
@@ -198,7 +225,10 @@ def test_accepts_unverified_community_report(
             "vegan_composition": "negative",
             "environmental_impact": "positive",
             "details": "The label lists an ingredient that should be independently reviewed.",
-            "evidence_url": "https://example.org/product-source",
+            "evidence_urls": [
+                "https://example.org/product-source",
+                "https://news.example.org/product-report",
+            ],
         },
         files=[
             ("photo", ("product.png", b"\x89PNG\r\n\x1a\ncontent", "image/png")),
@@ -215,6 +245,11 @@ def test_accepts_unverified_community_report(
     assert payload["has_photo"] is True
     assert payload["document_count"] == 1
     assert payload["category"] == "beverages"
+    saved_report = consumer_evidence_repository.community_reports[0]  # type: ignore[attr-defined]
+    assert [str(url) for url in saved_report.evidence_urls] == [
+        "https://example.org/product-source",
+        "https://news.example.org/product-report",
+    ]
     assert payload["assessments"] == [
         {"dimension": "vegan_composition", "outcome": "negative"},
         {"dimension": "environmental_impact", "outcome": "positive"},
@@ -231,6 +266,10 @@ def test_accepts_unverified_community_report(
     assert public_report["status"] == "published_unverified"
     assert public_report["category"] == "beverages"
     assert public_report["assessments"] == payload["assessments"]
+    assert public_report["evidence_urls"] == [
+        "https://example.org/product-source",
+        "https://news.example.org/product-report",
+    ]
     assert public_report["photo_url"] is not None
     assert public_report["documents"][0]["file_name"] == "evidence.pdf"
 
@@ -285,6 +324,7 @@ class StubResearchService:
         assert language == UserLocale.ENGLISH
         return ProductResearchResponse(product=self.product, cached=False)
 
+
     def ask(
         self,
         barcode: str,
@@ -320,6 +360,44 @@ class StubResearchService:
         assert mime_type == "image/png"
         assert language == UserLocale.ENGLISH
         return ProductResearchResponse(product=self.product, cached=False)
+
+
+def test_ask_automatically_ensures_research_before_using_rag() -> None:
+    expected = ConsumerAnswerResponse(
+        question="What evidence is available?",
+        answer="The persisted evidence supports this answer [1].",
+        insufficient_evidence=False,
+        citations=[],
+        retrieval_model="embedding-test",
+        generation_model="gemini-test",
+        prompt_version="rag-test",
+        cached=True,
+    )
+
+    class RepositoryStub:
+        def get_research(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+            return None
+
+        def get_cached_answer(self, *args: object, **kwargs: object) -> ConsumerAnswerResponse:
+            del args, kwargs
+            return expected
+
+    service = ConsumerResearchService.__new__(ConsumerResearchService)
+    service._repository = RepositoryStub()  # type: ignore[assignment]
+    service._researcher = type("ResearcherStub", (), {"prompt_version": "research-v7"})()  # type: ignore[assignment]
+    research_calls: list[str] = []
+    service.research = lambda barcode, **kwargs: research_calls.append(barcode)  # type: ignore[method-assign,assignment]
+
+    response = service.ask(
+        "7891000100103",
+        "What evidence is available?",
+        top_k=4,
+        language=UserLocale.ENGLISH,
+    )
+
+    assert research_calls == ["7891000100103"]
+    assert response == expected
 
 
 def test_research_and_question_routes(

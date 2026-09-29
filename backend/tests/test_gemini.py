@@ -33,11 +33,13 @@ class FakeSearchProvider:
         brand: str | None,
         barcode: str,
         organization_names: tuple[str, ...] = (),
+        organization_jurisdiction: str | None = None,
     ) -> PublicWebSearchResult:
         assert product_name == "Example product"
         assert brand == "Example brand"
         assert barcode == "7891000100103"
         assert organization_names == ("Example Group",)
+        assert organization_jurisdiction == "United Kingdom"
         return PublicWebSearchResult(
             provider_response_id="search-1",
             sources=[
@@ -54,6 +56,16 @@ class FakeSearchProvider:
                     provider_name="ngo.example",
                     url="https://ngo.example/report",
                     cited_text="The report describes a worker program.",
+                    focus="women_workers",
+                ),
+                GroundedWebSource(
+                    number=3,
+                    title="News coverage",
+                    provider_name="news.example",
+                    url="https://news.example/inclusion",
+                    cited_text="The article reports on an inclusion controversy.",
+                    focus="minority_inclusion",
+                    source_class="journalism",
                 ),
             ],
         )
@@ -65,6 +77,7 @@ class FakeOrganizationResolver:
         assert brand_owner == "Example Group"
         return OrganizationLookup(
             names=("Example Group",),
+            jurisdiction="United Kingdom",
             source=GroundedWebSource(
                 number=0,
                 title="Example brand — organization record",
@@ -124,13 +137,13 @@ def test_gemini_synthesizes_search_sources_and_rejects_uncited_claims() -> None:
         brand_owner="Example Group",
     )
 
-    assert len(result.sources) == 3
+    assert len(result.sources) == 4
     assert result.sources[0].provider_name == "example.org"
     assert result.provider_response_id == "synthesis-1"
     assert result.organization is not None
     assert result.organization.parent_company == "Example Group"
-    assert result.sources[2].number == 3
-    assert result.sources[2].provider_name == "Wikidata"
+    assert result.sources[3].number == 4
+    assert result.sources[3].provider_name == "Wikidata"
     assert len(client.models.calls) == 1
     assert getattr(client.models.calls[0]["config"], "tools", None) is None
     minority = next(
@@ -138,5 +151,6 @@ def test_gemini_synthesizes_search_sources_and_rejects_uncited_claims() -> None:
         for item in result.assessments
         if item.dimension == AssessmentDimension.MINORITY_INCLUSION
     )
-    assert minority.status == AssessmentStatus.NOT_DISCLOSED
-    assert minority.source_numbers == []
+    assert minority.status == AssessmentStatus.UNKNOWN
+    assert minority.source_numbers == [3]
+    assert "Review the linked sources" in minority.finding

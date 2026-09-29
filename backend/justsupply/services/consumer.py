@@ -96,6 +96,8 @@ class ConsumerService:
                     raise
                 catalog_products = []
                 catalog_request_succeeded = False
+            else:
+                catalog_request_succeeded = _catalog_results_cacheable(catalog_products)
         products = [self.assess(product, language) for product in catalog_products]
         self._repository.save_many(list(zip(catalog_products, products, strict=True)))
         if not catalog_cache_hit and catalog_request_succeeded:
@@ -176,7 +178,7 @@ class ConsumerService:
             brand=product.brand,
             image_url=product.image_url,
             source_url=product.source_url,
-            source_name="Open Food Facts",
+            source_name=product.source_name,
             last_updated_at=product.last_updated_at,
             evidence_coverage_percent=_evidence_coverage(assessments),
             assessments=assessments,
@@ -283,7 +285,7 @@ class ConsumerService:
                 category=report.category,
                 assessments=list(report.assessments),
                 observations=report.observations,
-                evidence_url=report.evidence_url,
+                evidence_urls=list(report.evidence_urls),
                 photo_url=(
                     f"/api/v1/consumer/reports/{report.id}/photo"
                     if report.has_photo
@@ -382,7 +384,7 @@ class ConsumerResearchService:
         )
         base_product = consumer.assess(catalog_product, language)
         self._repository.save_many([(catalog_product, base_product)])
-        if not cache_hit:
+        if not cache_hit and _catalog_results_cacheable(products):
             self._repository.save_catalog_search(
                 barcode,
                 products,
@@ -435,6 +437,13 @@ class ConsumerResearchService:
         top_k: int,
         language: UserLocale = UserLocale.ENGLISH,
     ) -> ConsumerAnswerResponse:
+        research = self._repository.get_research(
+            barcode,
+            language,
+            expected_prompt_version=self._researcher.prompt_version,
+        )
+        if research is None or not research.fresh:
+            self.research(barcode, refresh=False, language=language)
         cached = self._repository.get_cached_answer(
             barcode,
             question,
@@ -537,7 +546,7 @@ class ConsumerResearchService:
         )
         base_product = consumer.assess(catalog_product, language)
         self._repository.save_many([(catalog_product, base_product)])
-        if not cache_hit:
+        if not cache_hit and _catalog_results_cacheable(products):
             self._repository.save_catalog_search(
                 barcode,
                 products,
@@ -627,17 +636,26 @@ def _vegan_assessment(
     animal_ingredients = _animal_ingredients(product)
     ambiguous_ingredients = _ambiguous_ingredients(product)
     attribute = product.vegan_attribute
-    if "en:non-vegan" in tags or animal_ingredients or (
+    catalog_non_vegan = "en:non-vegan" in tags or (
         attribute is not None and attribute.status == "known" and attribute.match == 0
-    ):
+    )
+    catalog_vegan = "en:vegan" in tags or explicit_vegan_label or (
+        attribute is not None and attribute.status == "known" and attribute.match == 100
+    )
+    use_ingredient_source = False
+    if catalog_non_vegan or animal_ingredients:
         status = AssessmentStatus.CONCERN
         finding_key = "vegan_concern_named" if animal_ingredients else "vegan_concern"
         finding = _catalog_text(finding_key, language).format(
             ingredients=", ".join(animal_ingredients[:5])
         )
-    elif "en:vegan" in tags or explicit_vegan_label or (
-        attribute is not None and attribute.status == "known" and attribute.match == 100
-    ):
+        use_ingredient_source = bool(
+            animal_ingredients
+            and not catalog_non_vegan
+            and not product.non_vegan_ingredients
+            and product.ingredients_source_url
+        )
+    elif catalog_vegan:
         status = AssessmentStatus.SUPPORTED
         finding = _catalog_text("vegan_supported", language)
     elif ambiguous_ingredients:
@@ -645,9 +663,13 @@ def _vegan_assessment(
         finding = _catalog_text("vegan_ambiguous", language).format(
             ingredients=", ".join(ambiguous_ingredients[:5])
         )
+        use_ingredient_source = bool(
+            not product.maybe_non_vegan_ingredients and product.ingredients_source_url
+        )
     elif product.ingredients_text:
         status = AssessmentStatus.UNKNOWN
         finding = _catalog_text("vegan_no_obvious", language)
+        use_ingredient_source = product.ingredients_source_url is not None
     else:
         status = AssessmentStatus.UNKNOWN
         finding = _catalog_text("vegan_unknown", language)
@@ -659,6 +681,8 @@ def _vegan_assessment(
         finding,
         "Ingredient list, labels, and vegan analysis",
         language,
+        source_name=(product.ingredients_source_name if use_ingredient_source else None),
+        source_url=(product.ingredients_source_url if use_ingredient_source else None),
     )
 
 
@@ -666,6 +690,25 @@ def _environmental_assessment(
     product: CatalogProduct,
     language: UserLocale,
 ) -> ConsumerAssessment:
+    if product.source_name == "USDA FoodData Central":
+        return ConsumerAssessment(
+            dimension=AssessmentDimension.ENVIRONMENTAL_IMPACT,
+            title=_dimension_title(
+                AssessmentDimension.ENVIRONMENTAL_IMPACT,
+                language,
+            ),
+            status=AssessmentStatus.UNKNOWN,
+            finding=_catalog_text("environment_primary_unavailable", language),
+            evidence_scope=EvidenceScope.PRODUCT,
+            verification=VerificationLevel.UNVERIFIED,
+            verification_note=_catalog_text(
+                "environment_usda_not_evidence",
+                language,
+            ),
+            limitations=_catalog_text("environment_research_needed", language),
+            sources=[],
+        )
+
     grade = (product.environmental_score_grade or "").lower()
     forest = product.forest_footprint_attribute
     if grade in {"a", "b"}:
@@ -708,6 +751,10 @@ def _search_key(value: str) -> str:
         if not unicodedata.combining(character)
     )
     return " ".join(normalized.split())
+
+
+def _catalog_results_cacheable(products: list[CatalogProduct]) -> bool:
+    return not any(product.catalog_degraded for product in products)
 
 
 _ANIMAL_INGREDIENT_PATTERNS = {
@@ -773,7 +820,22 @@ def _catalog_assessment(
     finding: str,
     location: str,
     language: UserLocale,
+    *,
+    source_name: str | None = None,
+    source_url: str | None = None,
 ) -> ConsumerAssessment:
+    provider_name = source_name or product.source_name
+    provider_url = source_url or product.source_url
+    verification_key = (
+        "catalog_verification_usda"
+        if provider_name == "USDA FoodData Central"
+        else "catalog_verification"
+    )
+    limitations_key = (
+        "catalog_limitations_usda"
+        if provider_name == "USDA FoodData Central"
+        else "catalog_limitations"
+    )
     return ConsumerAssessment(
         dimension=dimension,
         title=title,
@@ -781,13 +843,13 @@ def _catalog_assessment(
         finding=finding,
         evidence_scope=EvidenceScope.PRODUCT,
         verification=VerificationLevel.CATALOG_DATA,
-        verification_note=_catalog_text("catalog_verification", language),
-        limitations=_catalog_text("catalog_limitations", language),
+        verification_note=_catalog_text(verification_key, language),
+        limitations=_catalog_text(limitations_key, language),
         sources=[
             AssessmentSourceRead(
-                title=f"{product.name} — Open Food Facts",
-                provider_name="Open Food Facts",
-                url=product.source_url,
+                title=f"{product.name} — {provider_name}",
+                provider_name=provider_name,
+                url=provider_url,
                 published_at=product.last_updated_at,
                 source_location=location,
             )
@@ -862,10 +924,15 @@ def _catalog_text(key: str, language: UserLocale) -> str:
             "environment_mixed": "Open Food Facts reports a middle Green-Score grade (C).",
             "environment_concern": "Open Food Facts reports a low Green-Score grade ({grade}).",
             "environment_unknown": "No usable Green-Score is available for this product.",
+            "environment_primary_unavailable": "Open Food Facts did not provide environmental evidence for this product.",
+            "environment_usda_not_evidence": "USDA FoodData Central is used only for product identity and ingredients, not as environmental evidence.",
+            "environment_research_needed": "Run public-source research to look for cited evidence about climate, deforestation, water, packaging, and sustainability.",
             "forest_supported": "The catalog's Forest Footprint attribute is favorable.",
             "forest_concern": "The catalog's Forest Footprint attribute indicates a concern.",
             "catalog_verification": "Reported by the community-maintained Open Food Facts catalog; inspect the product page and label image before relying on it.",
             "catalog_limitations": "Catalog data may be incomplete, outdated, or entered by contributors.",
+            "catalog_verification_usda": "Reported by the US government FoodData Central branded-food database; inspect the linked record and package label before relying on it.",
+            "catalog_limitations_usda": "USDA branded-food data may be incomplete, outdated, or limited to products marketed in the United States.",
             "women_not_researched": "No brand employment research has been run for this product yet.",
             "minority_not_researched": "No inclusion research has been run for this product yet.",
             "unverified_note": "No public-source research has been completed for this dimension.",
@@ -882,10 +949,15 @@ def _catalog_text(key: str, language: UserLocale) -> str:
             "environment_mixed": "O Open Food Facts informa um Green-Score intermediário (C).",
             "environment_concern": "O Open Food Facts informa um Green-Score baixo ({grade}).",
             "environment_unknown": "Não há um Green-Score utilizável para este produto.",
+            "environment_primary_unavailable": "O Open Food Facts não forneceu evidências ambientais para este produto.",
+            "environment_usda_not_evidence": "O USDA FoodData Central é usado somente para identificar o produto e obter ingredientes, não como evidência ambiental.",
+            "environment_research_needed": "Execute a pesquisa em fontes públicas para procurar evidências citadas sobre clima, desmatamento, água, embalagem e sustentabilidade.",
             "forest_supported": "O atributo Forest Footprint do catálogo é favorável.",
             "forest_concern": "O atributo Forest Footprint do catálogo indica uma preocupação.",
             "catalog_verification": "Informado pelo catálogo comunitário Open Food Facts; confira a página do produto e a imagem do rótulo antes de confiar no dado.",
             "catalog_limitations": "Os dados do catálogo podem estar incompletos, desatualizados ou ter sido inseridos por colaboradores.",
+            "catalog_verification_usda": "Informado pela base governamental norte-americana FoodData Central; confira o registro e o rótulo do produto antes de confiar no dado.",
+            "catalog_limitations_usda": "Os dados de produtos de marca do USDA podem estar incompletos, desatualizados ou limitados a itens comercializados nos Estados Unidos.",
             "women_not_researched": "A pesquisa sobre emprego de mulheres na marca ainda não foi executada para este produto.",
             "minority_not_researched": "A pesquisa sobre inclusão na marca ainda não foi executada para este produto.",
             "unverified_note": "Nenhuma pesquisa em fontes públicas foi concluída para esta dimensão.",
@@ -902,10 +974,15 @@ def _catalog_text(key: str, language: UserLocale) -> str:
             "environment_mixed": "Open Food Facts informa un Green-Score intermedio (C).",
             "environment_concern": "Open Food Facts informa un Green-Score bajo ({grade}).",
             "environment_unknown": "No hay un Green-Score utilizable para este producto.",
+            "environment_primary_unavailable": "Open Food Facts no proporcionó evidencia ambiental para este producto.",
+            "environment_usda_not_evidence": "USDA FoodData Central se utiliza solamente para identificar el producto y obtener ingredientes, no como evidencia ambiental.",
+            "environment_research_needed": "Ejecuta la investigación en fuentes públicas para buscar evidencia citada sobre clima, deforestación, agua, empaque y sostenibilidad.",
             "forest_supported": "El atributo Forest Footprint del catálogo es favorable.",
             "forest_concern": "El atributo Forest Footprint del catálogo indica una preocupación.",
             "catalog_verification": "Informado por el catálogo comunitario Open Food Facts; revisa la página del producto y la imagen de la etiqueta antes de confiar en el dato.",
             "catalog_limitations": "Los datos del catálogo pueden estar incompletos, desactualizados o haber sido ingresados por colaboradores.",
+            "catalog_verification_usda": "Informado por la base gubernamental estadounidense FoodData Central; revisa el registro y la etiqueta antes de confiar en el dato.",
+            "catalog_limitations_usda": "Los datos de alimentos de marca del USDA pueden estar incompletos, desactualizados o limitados a productos comercializados en Estados Unidos.",
             "women_not_researched": "La investigación sobre empleo de mujeres en la marca aún no se ejecutó para este producto.",
             "minority_not_researched": "La investigación sobre inclusión en la marca aún no se ejecutó para este producto.",
             "unverified_note": "No se completó una investigación en fuentes públicas para esta dimensión.",

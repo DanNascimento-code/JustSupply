@@ -165,7 +165,13 @@ describe('consumer evidence experience', () => {
   })
 
   it('shows product image and transparent evidence labels', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(searchResult)))
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (input.toString().includes('/research')) {
+        return jsonResponse({ product, cached: true })
+      }
+      return jsonResponse(searchResult)
+    })
+    vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
     renderApp()
     await user.type(screen.getByLabelText('Product, brand, or barcode'), product.barcode!)
@@ -174,6 +180,9 @@ describe('consumer evidence experience', () => {
     expect(screen.getByAltText(`${product.name} package`)).toBeInTheDocument()
     expect(screen.getAllByText('Catalog data')).not.toHaveLength(0)
     expect(screen.getAllByText('Unverified')).not.toHaveLength(0)
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input]) => input.toString().includes('/research'))).toBe(true)
+    })
   })
 
   it('researches public sources and answers a grounded question', async () => {
@@ -212,15 +221,54 @@ describe('consumer evidence experience', () => {
     renderApp()
     await user.type(screen.getByLabelText('Product, brand, or barcode'), product.barcode!)
     await user.click(screen.getByRole('button', { name: 'Search evidence' }))
-    await user.click(await screen.findByRole('button', { name: 'Research public sources' }))
-    expect(await screen.findByText('2 cited sources researched')).toBeInTheDocument()
+    expect(await screen.findByText('2 public sources reviewed')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Research public sources' })).not.toBeInTheDocument()
     await user.type(
       screen.getByLabelText(`Question about ${product.name}`),
       'What evidence exists about women workers?',
     )
     await user.click(screen.getByRole('button', { name: 'Ask' }))
     expect(await screen.findByText(/Two sources describe a leadership program/)).toBeInTheDocument()
-    expect(screen.getByText(/91% match/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Independent report/ })).toBeInTheDocument()
+    expect(screen.queryByText(/91% match/)).not.toBeInTheDocument()
+  })
+
+  it('keeps Ask available when automatic research needs a retry', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString()
+      if (url.includes('/research')) {
+        return jsonResponse({ detail: 'Research temporarily unavailable.' }, 503)
+      }
+      if (url.endsWith('/ask')) {
+        return jsonResponse({
+          question: 'What evidence is available?',
+          answer: 'The backend retried research before answering.',
+          insufficient_evidence: false,
+          citations: [],
+          retrieval_model: 'gemini-embedding-test',
+          generation_model: 'gemini-test',
+          prompt_version: 'consumer-evidence-rag-v1',
+          cached: false,
+        })
+      }
+      return jsonResponse(searchResult)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+    renderApp()
+
+    await user.type(screen.getByLabelText('Product, brand, or barcode'), product.barcode!)
+    await user.click(screen.getByRole('button', { name: 'Search evidence' }))
+    const askButton = await screen.findByRole('button', { name: 'Ask' })
+    await waitFor(() => expect(askButton).toBeEnabled())
+    await user.type(
+      screen.getByLabelText(`Question about ${product.name}`),
+      'What evidence is available?',
+    )
+    await user.click(askButton)
+
+    expect(await screen.findByText('The backend retried research before answering.'))
+      .toBeInTheDocument()
   })
 
   it('submits product assessments as an unverified community report', async () => {
@@ -256,6 +304,15 @@ describe('consumer evidence experience', () => {
       screen.getByLabelText('Observations'),
       'The package makes an environmental claim without identifying a source.',
     )
+    await user.type(
+      screen.getByLabelText('Supporting source links (optional, recommended) 1'),
+      'https://example.org/source-one',
+    )
+    await user.click(screen.getByRole('button', { name: 'Add another source link' }))
+    await user.type(
+      screen.getByLabelText('Supporting source links (optional, recommended) 2'),
+      'https://example.org/source-two',
+    )
     await user.click(screen.getByRole('button', { name: 'Publish unverified report' }))
 
     expect(
@@ -267,6 +324,10 @@ describe('consumer evidence experience', () => {
     expect(submittedBody).toBeInstanceOf(FormData)
     if (!(submittedBody instanceof FormData)) throw new Error('Expected multipart form data.')
     expect(submittedBody.get('category')).toBe('beverages')
+    expect(submittedBody.getAll('evidence_urls')).toEqual([
+      'https://example.org/source-one',
+      'https://example.org/source-two',
+    ])
   })
 
   it('shows public unverified reports and their supporting material', async () => {
@@ -281,7 +342,10 @@ describe('consumer evidence experience', () => {
         category: 'beverages',
         assessments: [{ dimension: 'environmental_impact', outcome: 'negative' }],
         observations: 'The environmental claim does not identify a supporting study.',
-        evidence_url: 'https://example.org/source',
+        evidence_urls: [
+          'https://example.org/source',
+          'https://news.example.org/source',
+        ],
         photo_url: '/api/v1/consumer/reports/f42f350b-a83d-4c43-81bd-b476800a54e8/photo',
         documents: [{
           id: 'a5c0cdde-3f0d-4979-8233-1b312f4dc1ac',
@@ -301,6 +365,8 @@ describe('consumer evidence experience', () => {
     expect(await screen.findByRole('heading', { name: 'Example drink' })).toBeInTheDocument()
     expect(screen.getByText(/does not identify a supporting study/)).toBeInTheDocument()
     expect(screen.getByLabelText('Is this product sustainable?: No')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open submitted source 1 ↗' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open submitted source 2 ↗' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Download evidence.pdf' })).toBeInTheDocument()
     expect(screen.getByText('Unverified community content')).toBeInTheDocument()
     await user.selectOptions(screen.getByLabelText('Filter reports by category'), 'beverages')

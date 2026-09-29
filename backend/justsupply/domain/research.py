@@ -26,6 +26,7 @@ class PublicWebSearchResult:
 class OrganizationLookup:
     names: tuple[str, ...]
     source: GroundedWebSource | None = None
+    jurisdiction: str | None = None
 
 
 @dataclass(frozen=True)

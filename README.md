@@ -1,67 +1,105 @@
 # JustSupply
 
-**Evidence-first product research for more informed purchasing decisions.**
+**An evidence-first product research platform for ethical purchasing decisions.**
 
-JustSupply is a multilingual consumer application that helps people investigate the ethical and
-environmental context behind everyday products. A user can search by product name, brand, or
-barcode, inspect the product photo, and review separate findings about vegan composition,
-environmental impact, women in the workforce, and the inclusion of historically excluded groups.
+JustSupply helps consumers investigate what sits behind everyday product claims. Search by product
+name, brand, or barcode to review vegan composition, environmental impact, fair pay and
+opportunities for women, and the inclusion of historically excluded groups.
 
-The project combines structured product data, live public-web research, and retrieval-augmented
-generation (RAG). Its central principle is simple: an AI-generated statement is not evidence by
-itself. Every meaningful conclusion must show where it came from, how strong its support is, and
-what remains unknown.
+Instead of producing an opaque ethical score, JustSupply keeps every dimension separate, links
+findings to their sources, and makes missing or conflicting information visible. Generative AI is
+used to organize and explain evidence—not to replace it.
 
-> JustSupply does not certify products or declare a universal "best" choice. It organizes public
-> evidence so that consumers can make decisions according to their own priorities.
+> JustSupply does not certify products or declare a universal “best” choice. It helps people inspect
+> available evidence and decide according to their own priorities.
 
-## Why this project exists
+## At a glance
 
-Labels such as *vegan*, *sustainable*, or *inclusive* are useful, but they rarely tell the whole
-story. Relevant information is fragmented across product databases, certification registries,
-company disclosures, NGO reports, regulators, and journalism. Social and environmental claims may
-also be incomplete, outdated, broad enough to apply only to a brand, or supported exclusively by
-the company making the claim.
+| Product | Engineering |
+| --- | --- |
+| Search by name, brand, or barcode | React 19 + TypeScript single-page application |
+| Product image and catalog information | FastAPI + Pydantic typed REST API |
+| Four independent ethical assessments | PostgreSQL + SQLAlchemy + Alembic |
+| Automatic public-source research | Gemini structured generation + Tavily retrieval |
+| Questions answered with citations | LangChain RAG + pgvector semantic search |
+| Community reports with optional supporting material | Validated image and document uploads |
+| English, Portuguese, and Spanish | Persisted localized findings and locale-aware UI |
+| Explicit uncertainty and provenance | Server-side citation and trust validation |
 
-JustSupply was created to make that uncertainty visible instead of hiding it behind an opaque
-score. The application is designed around four motivations:
+This portfolio project demonstrates full-stack software engineering with a particular focus on AI
+engineering, retrieval-augmented generation, resilient external integrations, data provenance, and
+responsible product design.
 
-- make public evidence easier for non-specialists to inspect;
-- separate product facts from brand-level policies and disclosures;
-- distinguish a documented concern from information that is simply unavailable;
-- use generative AI for research and explanation without treating model output as a source.
+## The problem
 
-## What users can do
+Terms such as *vegan*, *sustainable*, and *inclusive* are useful, but rarely tell the whole story.
+Relevant information is fragmented across product catalogs, ingredient lists, certification
+registries, corporate disclosures, regulators, equality benchmarks, and journalism.
 
-1. Search for a food product by name, brand, or 8–14 digit barcode across Open Food Facts and
-   persisted JustSupply community submissions.
-2. See its catalog identity, brand, package image, update date, automated evidence, and separate
-   positive and negative community totals.
-3. Review independent assessment cards for:
-   - vegan composition;
-   - environmental impact;
-   - employment and advancement of women;
-   - inclusion of minorities and historically excluded groups.
-4. Start on-demand public-source research for a selected product and brand.
-5. Open every cited public source and inspect limitations attached to each finding.
-6. Ask a specific question through a RAG assistant that answers only from retrieved evidence.
-7. Submit a community assessment by product name or barcode, reporting yes or no for vegan
-   composition, sustainability, support for women, and support for minorities. Users may answer
-   only the dimensions they know, select a normalized food category, and add observations, a source
-   link, photo, or documents.
-8. Browse public community reports, filter them by food category or from a product result, and
-   inspect their attached photos, source links, and documents under an explicit unverified-content
-   warning.
-9. Use the entire experience in English, Brazilian Portuguese, or Latin American Spanish.
+The available evidence can also differ in scope:
 
-English is the default language. The language selector is always available in the header, and the
-preference is remembered locally. A single research run creates all three localized versions, so
-changing the interface language does not repeat the web research or consume another research
-request. Source titles and excerpts remain in their original language to preserve provenance.
+- an ingredient list describes a specific product;
+- packaging and environmental indicators may apply to one formulation or market;
+- employment and pay disclosures usually apply to a legal company or parent organization;
+- a policy proves that a policy was published, not that every workplace outcome is positive;
+- silence is missing information, not proof of misconduct.
 
-## How evidence is presented
+JustSupply models those distinctions directly instead of compressing them into one unexplained
+rating.
 
-JustSupply deliberately avoids a single ethical score. Each dimension has its own status:
+## Product experience
+
+### Search and compare evidence
+
+Users can search food products using a name, brand, or 8–14 digit barcode. Results combine Open
+Food Facts, an optional USDA FoodData Central fallback, previously persisted catalog data, and
+matching community-only submissions.
+
+Every product can display:
+
+- catalog identity, brand, barcode, package image, and update date;
+- vegan composition and ingredient concerns;
+- environmental indicators and public sustainability evidence;
+- representation, leadership, pay equity, and opportunities for women;
+- minority and historically excluded-group inclusion;
+- product-level versus brand-level scope;
+- supporting sources, verification strength, and limitations;
+- positive and negative community totals kept separate from researched findings.
+
+### Ask questions about the evidence
+
+After research is available, users can ask product-specific questions. The assistant retrieves
+relevant passages from the latest product and brand evidence, answers only from that context, and
+links each supported statement back to a source. When the retrieved material cannot support an
+answer, the application returns an explicit insufficient-information result instead of guessing.
+
+### Contribute community knowledge
+
+Users can publish an unverified product report with:
+
+- product name and/or barcode;
+- one required category from a controlled food taxonomy;
+- positive or negative assessments for any known dimensions;
+- written observations;
+- up to five supporting links;
+- an optional product or label photo;
+- up to three optional PDF, DOCX, or TXT documents.
+
+Community submissions are reusable in future searches but remain visibly separated from catalog
+and researched evidence. Publication does not mean that JustSupply verified the report.
+
+### Use the complete interface in three languages
+
+English is the default language. Brazilian Portuguese and Latin American Spanish are always
+available from the header. The selected locale is remembered in the browser.
+
+One research run stores localized findings for all three languages, avoiding repeated web and
+model calls when the user changes the interface language. Original source titles and excerpts are
+preserved for provenance.
+
+## Evidence model
+
+JustSupply deliberately avoids a single ethical score. Each assessment uses one of five states:
 
 | Status | Meaning |
 | --- | --- |
@@ -69,244 +107,253 @@ JustSupply deliberately avoids a single ethical score. Each dimension has its ow
 | `mixed` | Sources or indicators point in different directions. |
 | `concern` | A cited source documents a relevant concern. |
 | `not_disclosed` | Direct public disclosure was not found. |
-| `unknown` | Available data is insufficient to reach a conclusion. |
+| `unknown` | Available information is insufficient for a conclusion. |
 
-Every result also communicates its evidence scope and verification level:
+The application also records whether evidence applies to the product or brand and whether it comes
+from catalog data, one source, multiple sources, or an unverified submission.
 
-- **Product-level evidence** concerns that specific formulation, package, or certification.
-- **Brand-level evidence** concerns policies, employment, leadership, or company-wide reporting.
-- **Catalog data** comes from the community-maintained Open Food Facts database.
-- **Single source** means corroboration is limited.
-- **Multiple sources** indicates broader public support.
-- **Unverified** means no valid public source was attached to the claim.
+Core trust rules are enforced by application code:
 
-Missing disclosure is never converted into evidence of wrongdoing, and a general brand or regional
-risk is never presented as proof about a specific product.
+- favorable, mixed, and concern findings require at least one valid source reference;
+- invalid or out-of-range citations are discarded;
+- uncited model claims are downgraded to `unknown` or `not_disclosed`;
+- company policies are not presented as measured workforce outcomes;
+- regional and industry risks are not presented as proof about a specific product;
+- missing disclosure is never converted into evidence of wrongdoing;
+- relevant but inconclusive journalism can be shown for inspection without becoming a confirmed
+  conclusion.
 
-For vegan composition, JustSupply uses a layered fallback instead of relying on one catalog flag:
+## AI and RAG workflow
 
-1. Open Food Facts vegan analysis and label tags;
-2. structured and raw ingredient lists checked by deterministic multilingual rules;
-3. explicit identification of animal-derived and ambiguous ingredients;
-4. public vegan-certification registries and official product pages found during research;
-5. the public ingredient-label image, when Open Food Facts has an image but no usable ingredient
-   text, supplied to Gemini as multimodal evidence.
-6. an optional JPEG, PNG, or WebP ingredient-label photo uploaded by the user (maximum 4 MB),
-   stored with the product so the cited visual evidence remains inspectable.
-
-An ingredient list with no obvious animal ingredient is still not treated as certification.
-
-## Environmental research
-
-The first environmental signals come from the Open Food Facts Green-Score and Forest Footprint
-attributes when they are available.
-The optional Tavily retrieval and Gemini synthesis look for product- or brand-relevant public
-evidence involving:
-
-- deforestation and land-use risk;
-- climate and greenhouse-gas impact;
-- water use and water-related risks;
-- packaging and recyclability;
-- sustainability commitments and independently documented progress;
-- supply-chain origin and traceability.
-
-When no product-specific evidence exists, JustSupply reports that limitation instead of inferring a
-negative conclusion from a country, commodity, or industry-level risk.
-
-## AI and RAG design
-
-The AI workflow uses two distinct stages so that collection and interpretation remain auditable.
+The system separates discovery, synthesis, persistence, retrieval, and answer generation so each
+stage remains inspectable and replaceable.
 
 ```mermaid
 flowchart LR
-    A[Product search] --> B[Open Food Facts]
-    B --> C[Catalog assessments]
-    C --> D{Research requested?}
-    D -- No --> E[Transparent catalog result]
-    D -- Yes --> F[Tavily Search]
-    F --> G[Public sources with URLs and excerpts]
-    G --> H[Gemini multilingual synthesis]
+    A[Product or barcode search] --> B[Open Food Facts]
+    B --> C[Optional USDA ingredient fallback]
+    B --> D[Deterministic catalog assessments]
+    D --> E{Fresh research cached?}
+    E -- Yes --> K[Localized assessment cards]
+    E -- No --> F[Brand and legal-entity resolution]
+    F --> G[Targeted public-source retrieval]
+    G --> H[Gemini structured synthesis]
     H --> I[Server-side citation validation]
     I --> J[(PostgreSQL + pgvector)]
-    J --> K[Semantic retrieval]
-    K --> L[LangChain RAG answer]
-    L --> M[Cited answer or insufficient evidence]
+    J --> K
+    J --> L[Semantic evidence retrieval]
+    L --> M[LangChain answer pipeline]
+    M --> N[Cited answer or insufficient information]
 ```
 
-### Public-source research
+### 1. Deterministic product assessment
 
-Before social retrieval, JustSupply combines Open Food Facts ownership metadata with Wikidata's
-owner, parent-organization, and manufacturer relationships. This turns a consumer brand such as
-Nescafé into the reporting organization, Nestlé, without asking Gemini to guess the relationship.
-Tavily then runs separate searches for vegan composition, environmental impact, women workers, and
-minority inclusion. Social retrieval searches both the brand and resolved organizations, using
-dedicated queries for government/benchmark records and deeper PDF searches for annual, ESG,
-sustainability, and diversity reports. Discoverable targets include UK Gender Pay Gap reporting,
-WGEA, SEC filings, EEOC, HRC, and Disability:IN data. Gemini then
-receives those sources as untrusted evidence and produces exactly four structured assessment
-dimensions. Separating retrieval from generation keeps the source trail independent from the
-language model and allows each provider to be tested or replaced independently. The server, not
-the model, enforces the trust rules:
+Vegan composition does not depend on a model alone. JustSupply combines:
 
-- positive, mixed, or concern findings require at least one valid source reference;
-- source numbers outside the grounded result are discarded;
-- uncited assertions are downgraded to `unknown` or `not_disclosed`;
-- product and brand scopes remain explicit;
-- a cited entity-resolution record connects a consumer brand to its legal reporting entity,
-  parent company, and jurisdiction when sources support that mapping;
-- obvious social-media and document-hosting domains are excluded, while every retained source is
-  classified as government, certification registry, public database, company disclosure,
-  independent benchmark, or unclassified;
-- evidence limitations are stored with the claim;
-- research is cached for seven days by default.
-- catalog searches, including empty results, are cached for 24 hours by default;
-- repeated RAG questions are cached against the exact research run, language, and retrieval size;
-- the newest women-workforce and minority-inclusion evidence is shared across products connected
-  to the same normalized brand.
+1. Open Food Facts vegan analysis and label tags;
+2. structured and raw ingredient lists;
+3. multilingual deterministic rules for animal-derived and ambiguous ingredients;
+4. USDA branded-food ingredients when primary catalog coverage is weak;
+5. certification registries and official pages discovered during research;
+6. catalog or user-supplied label images as bounded, product-level visual evidence.
 
-### Evidence-grounded questions
+An ingredient list with no obvious animal ingredient is not treated as vegan certification. USDA
+ingredient data is never presented as environmental evidence.
 
-Grounded passages are embedded with `gemini-embedding-2` using 1,536-dimensional vectors and stored
-in PostgreSQL through pgvector. For each question:
+### 2. Entity-aware public research
 
-1. the question is embedded in the selected language;
-2. cosine similarity retrieves evidence from the latest product research and the newest applicable
-   brand research;
-3. a LangChain runnable provides only those passages to Gemini;
-4. the generated response must cite retrieved evidence as `[1]`, `[2]`, and so on;
-5. the server rejects citation numbers outside the retrieved context;
-6. a response with no valid support becomes an explicit insufficient-evidence result;
-7. the grounded response is cached until a newer research run changes its evidence context.
+Employment evidence usually belongs to a legal employer rather than the consumer-facing brand.
+The organization resolver combines catalog ownership metadata with multilingual Wikidata searches
+to identify official names, parent or manufacturer relationships, and jurisdiction.
 
-LangChain is kept behind an integration adapter. Business rules, citation validation, persistence,
-and trust decisions remain ordinary application code, making them easier to test and reducing
-framework lock-in.
+Ambiguous candidates are scored and filtered by organization and consumer-sector context. For
+example, the resolver distinguishes the Brazilian dairy company **Vigor S.A.** from unrelated
+organizations that share the word “Vigor.”
+
+Tavily then runs focused searches rather than one broad prompt:
+
+- vegan composition and certification;
+- environmental impact, deforestation, climate, water, packaging, and traceability;
+- representation and leadership of women;
+- pay equity and gender pay gaps;
+- equal opportunity, hiring, promotion, and career progression;
+- minority inclusion, disability, race and ethnicity, and LGBTQ+ workplace evidence;
+- annual, sustainability, ESG, and diversity reports;
+- relevant journalism and reported controversies.
+
+Social queries use the resolved jurisdiction to prioritize English, Portuguese, or Spanish search
+terms. Before a result reaches Gemini, relevance filters require both a recognized company identity
+and dimension-specific language. Code assets, unrelated company reports, generic workforce studies,
+and unsupported search matches are rejected.
+
+Government records, public databases, certification registries, company disclosures, independent
+benchmarks, and journalism are classified separately so synthesis can weigh each source according
+to what it can actually prove.
+
+An optional Google Search Grounding adapter can be enabled alongside Tavily. A composite retriever
+merges and deduplicates sources while allowing either provider to fail without discarding valid
+results returned by the other.
+
+### 3. Structured multilingual synthesis
+
+Gemini receives source content as untrusted data and returns schema-validated JSON containing
+exactly four assessment dimensions, localized findings, limitations, source references, and
+optional organization resolution.
+
+Prompt instructions and external evidence are kept in separate boundaries to reduce prompt
+injection risk. The backend validates the generated structure and citations before persisting or
+displaying any assessment.
+
+### 4. Semantic retrieval and grounded answers
+
+Source passages are embedded with `gemini-embedding-2` into 1,536-dimensional vectors stored in
+PostgreSQL through pgvector. HNSW cosine-similarity search retrieves the latest applicable product
+and brand evidence.
+
+A LangChain runnable supplies only those passages to the answer generator. Generated citation
+numbers are checked against the retrieved context, and unsupported answers are replaced with an
+insufficient-information response.
+
+LangChain remains behind an adapter: business rules, persistence, citation validation, and trust
+decisions are ordinary application code rather than framework-specific chains.
 
 ## Architecture
 
 ```mermaid
 flowchart TB
     UI[React + TypeScript SPA]
-    API[FastAPI application]
-    CATALOG[Open Food Facts adapter]
-    AI[Gemini synthesis and embedding adapters]
-    SEARCH[Tavily public-web search adapter]
+    API[FastAPI REST API]
+    SERVICE[Application services]
+    CATALOG[Open Food Facts + USDA]
+    SEARCH[Tavily + optional Google Grounding]
     ENTITY[Wikidata organization resolver]
-    SERVICE[Consumer application services]
+    AI[Gemini synthesis and embeddings]
+    RAG[LangChain retrieval adapter]
     REPO[SQLAlchemy repository]
     DB[(PostgreSQL + pgvector)]
 
-    UI -->|REST / JSON| API
+    UI -->|JSON / multipart| API
     API --> SERVICE
     SERVICE --> CATALOG
     SERVICE --> SEARCH
     SERVICE --> ENTITY
     SERVICE --> AI
+    SERVICE --> RAG
     SERVICE --> REPO
     REPO --> DB
     SEARCH --> WEB[Public web sources]
 ```
 
-The backend follows clear boundaries:
+### Backend boundaries
 
-- **API routes** handle HTTP validation and status-code mapping.
-- **Application services** coordinate search, assessment, research, and RAG use cases.
-- **Integration adapters** isolate Open Food Facts, Gemini, embeddings, and LangChain.
-- **Repositories** own persistence queries and transaction boundaries.
-- **Pydantic schemas and domain types** define contracts between layers.
-- **Alembic migrations** version the PostgreSQL and pgvector schema.
+- **API routes** validate HTTP input and map domain errors to status codes.
+- **Application services** coordinate search, assessment, research, community reports, and Q&A.
+- **Integration adapters** isolate every external catalog, search provider, model, and framework.
+- **Repositories** own SQLAlchemy queries, persistence, caching, and transaction boundaries.
+- **Domain types and Pydantic schemas** define typed contracts between layers.
+- **Alembic migrations** version relational and vector schema changes.
 
-The evidence model stores products, brands, claims, public sources, evidence records, research runs,
-claim-to-evidence relationships, catalog search snapshots, and grounded-answer cache entries
-separately. This retains provenance, allows one source to support multiple conclusions, and avoids
-unnecessary catalog, embedding, and generation calls.
+### Data design
 
-Community reports are stored independently from verified claims. One report can provide a positive
-or negative answer for any combination of the four assessment dimensions, and future searches reuse
-the persisted positive and negative totals without an AI or web-search call. Structurally valid
-submissions are published with the `published_unverified` status and can be
-browsed on a dedicated public page or through a product-specific link. The interface always labels
-these entries as personal community accounts: publication does not mean that JustSupply verified
-the allegation, and a report cannot automatically change a product assessment. The data model also
-supports `pending_review` and `rejected` for a future moderation workflow.
+Products, brands, claims, sources, evidence records, research runs, claim-to-evidence relationships,
+catalog snapshots, answer caches, community reports, report outcomes, and attachments are stored as
+separate concepts.
 
-Every report has one required category selected from a controlled food taxonomy, including
-beverages, biscuits and cookies, yogurt, snacks and chips, ice cream, chocolate, ready meals, and
-other common groups. Controlled values prevent spelling variants from fragmenting filters. The main
-search merges catalog results with matching community-only products, while keeping automated
-assessments and community totals visually and structurally separate.
+This design preserves provenance, allows one source to support multiple findings, shares applicable
+brand evidence across products, and avoids unnecessary catalog, search, embedding, and generation
+calls.
 
-Supporting documents are stored in a separate attachment table and deduplicated per report by
-SHA-256 hash. The API accepts up to three validated PDF, DOCX, or UTF-8 text files of 8 MB each.
-Attachments are exposed only through opaque report and attachment identifiers, downloaded as
-attachments with browser content sniffing disabled, and are not sent to Gemini automatically.
-Sources and files remain optional so people can still contribute incomplete knowledge, but the
-interface recommends them because they make a report easier for readers to evaluate.
+## Notable engineering decisions
 
-User-supplied label images are validated by MIME type and file signature, limited to 4 MB, stored in
-PostgreSQL under an opaque UUID, and used only as product-level evidence. Authentication and a
-retention/deletion policy are required before treating this upload path as production-ready for
-personal or sensitive images; users should upload a cropped package label only.
+| Decision | Reason |
+| --- | --- |
+| Separate assessment dimensions | Prevents a positive result in one area from hiding a concern or data gap in another. |
+| Product and brand scopes remain explicit | Avoids attributing company-wide evidence to a specific formulation. |
+| Retrieval and synthesis are different stages | Keeps source discovery auditable and providers replaceable. |
+| Citation validation runs on the server | The model cannot make an unsupported claim valid by formatting it convincingly. |
+| Deterministic ingredient rules precede AI synthesis | Common product facts remain explainable, testable, and inexpensive. |
+| Brand-to-company resolution precedes social search | Employment disclosures usually use legal entity or parent-company names. |
+| Community reports use a separate trust channel | User contributions add coverage without silently changing researched conclusions. |
+| LangChain is isolated behind an adapter | Reduces framework lock-in and keeps domain behavior directly testable. |
+| Fresh results and answers are persisted | Reduces external API usage, latency, and repeated embedding work. |
+| Localized findings are generated once | Switching languages does not trigger another research run. |
+| External content is always untrusted | Reduces prompt-injection and provenance risks. |
 
-## Engineering highlights
+## Resilience, caching, and validation
 
-This project demonstrates practical full-stack and AI engineering skills, including:
-
-- a typed REST API with FastAPI, Pydantic, and dependency injection;
-- a responsive React 19 and TypeScript interface;
-- server-state synchronization and mutations with TanStack Query;
-- PostgreSQL persistence with SQLAlchemy and versioned Alembic migrations;
-- vector storage and HNSW cosine-similarity search with pgvector;
-- Tavily public-web retrieval with citable URLs and source excerpts;
-- Gemini schema-validated multilingual synthesis and embeddings;
-- RAG orchestration through LangChain Core without coupling domain rules to the framework;
-- defensive citation validation and explicit insufficient-evidence behavior;
-- prompt-injection-aware separation of instructions and untrusted product/evidence content;
-- multilingual UI, stored AI findings, locale-aware dates, and locale-aware RAG answers;
-- adapters and test doubles for deterministic unit tests;
-- PostgreSQL integration tests for persistence and vector retrieval;
-- normalized, moderation-ready community assessments with positive and negative outcomes,
-  controlled food categories, optional supporting material, localized warnings, category filters,
-  and main-search integration;
-- static typing, automated formatting, linting, unit tests, and production frontend builds.
+- Catalog searches—including empty results—are cached for 24 hours by default.
+- Public research is cached for seven days by default and versioned by research strategy.
+- Repeated questions are cached against the exact research run, language, and retrieval size.
+- A sequential frontend queue prevents broad searches from overwhelming quota-limited providers.
+- The composite product catalog falls back to USDA without replacing valid Open Food Facts matches.
+- Degraded USDA-only results are not cached, allowing later recovery of primary environmental data.
+- Multi-provider web retrieval keeps valid results when one provider is unavailable.
+- Label images are checked by MIME type and file signature and limited to 4 MB.
+- Report documents are type-checked, size-limited, deduplicated by SHA-256, and downloaded with
+  content sniffing disabled.
+- User-visible errors avoid exposing infrastructure, provider, or configuration details.
 
 ## Technology stack
 
-| Area | Technologies |
+| Area | Technologies and approaches |
 | --- | --- |
-| Frontend | React 19, TypeScript, Vite, React Router, TanStack Query |
-| Backend | Python 3.14, FastAPI, Pydantic, SQLAlchemy |
-| AI | Gemini API, schema-validated outputs, multilingual synthesis, Gemini Embeddings |
-| Web retrieval | Tavily Search API |
-| Entity resolution | Open Food Facts ownership data, Wikidata |
-| RAG | LangChain Core, pgvector, HNSW cosine similarity |
-| Data | PostgreSQL 18, Alembic, Open Food Facts |
-| Quality | pytest, MyPy strict mode, Ruff, Vitest, Testing Library, oxlint |
+| Frontend | React 19, TypeScript 6, Vite, React Router, TanStack Query |
+| Backend | Python 3.14, FastAPI, Pydantic, dependency injection |
+| Persistence | PostgreSQL 18, SQLAlchemy 2, Alembic migrations |
+| Vector search | pgvector, HNSW index, cosine similarity |
+| AI | Gemini structured generation, multilingual synthesis, multimodal label analysis |
+| Retrieval | Tavily Search, optional Google Search Grounding, relevance filtering |
+| RAG | Gemini Embeddings, LangChain Core, citation-constrained answers |
+| Product data | Open Food Facts, optional USDA FoodData Central fallback |
+| Entity resolution | Open Food Facts ownership metadata, Wikidata |
+| Backend quality | pytest, strict MyPy, Ruff |
+| Frontend quality | Vitest, Testing Library, oxlint, TypeScript compiler |
 | Local infrastructure | Docker Compose |
 
-The local free-tier default is `gemini-3.1-flash-lite` with low reasoning effort to reduce latency
-and capacity errors. The model remains configurable through `JUSTSUPPLY_GEMINI_MODEL`, and calls
-have a configurable timeout so provider congestion does not leave requests hanging indefinitely.
+## Repository structure
+
+```text
+JustSupply/
+├── backend/
+│   ├── justsupply/
+│   │   ├── api/             # FastAPI routes
+│   │   ├── core/            # Settings and configuration
+│   │   ├── database/        # Models, sessions, and Alembic migrations
+│   │   ├── domain/          # Framework-independent research types
+│   │   ├── integrations/    # Catalog, search, Gemini, Wikidata, and RAG adapters
+│   │   ├── repositories/    # SQLAlchemy persistence
+│   │   ├── schemas/         # Pydantic request and response contracts
+│   │   └── services/        # Application use cases and business rules
+│   └── tests/               # Unit and PostgreSQL integration tests
+├── frontend/
+│   └── src/
+│       ├── api/             # Typed API client
+│       ├── components/      # Product, assessment, Q&A, and report components
+│       ├── pages/           # Search and community-report pages
+│       └── i18n.tsx         # English, Portuguese, and Spanish dictionaries
+├── compose.yaml             # Local PostgreSQL + pgvector
+├── pyproject.toml           # Python package, dependencies, and quality tooling
+└── README.md
+```
 
 ## API overview
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `GET` | `/health` | Service health check. |
-| `GET` | `/api/v1/consumer/products` | Search catalog and community products by name, brand, or barcode. |
-| `GET` | `/api/v1/consumer/reports` | List unverified reports, optionally filtered by product or category. |
-| `POST` | `/api/v1/consumer/reports` | Publish an unverified categorized community assessment. |
-| `GET` | `/api/v1/consumer/reports/{report_id}/photo` | Read the optional report photo. |
-| `GET` | `/api/v1/consumer/reports/{report_id}/documents/{attachment_id}` | Download a supporting document. |
-| `POST` | `/api/v1/consumer/products/{barcode}/research` | Run or reuse cited public-source research. |
-| `POST` | `/api/v1/consumer/products/{barcode}/ask` | Retrieve evidence and generate a cited answer. |
+| `GET` | `/health` | Liveness check. |
+| `GET` | `/health/ready` | Database readiness check. |
+| `GET` | `/api/v1/consumer/products` | Search catalog and community products. |
+| `POST` | `/api/v1/consumer/products/{barcode}/research` | Run or reuse public-source research. |
+| `POST` | `/api/v1/consumer/products/{barcode}/research-label` | Research an uploaded label image. |
+| `GET` | `/api/v1/consumer/label-images/{image_id}` | Read a stored label image. |
+| `POST` | `/api/v1/consumer/products/{barcode}/ask` | Ask a question over retrieved evidence. |
+| `GET` | `/api/v1/consumer/reports` | Browse and filter public community reports. |
+| `POST` | `/api/v1/consumer/reports` | Publish an unverified community report. |
+| `GET` | `/api/v1/consumer/reports/{report_id}/photo` | Read an optional report photo. |
+| `GET` | `/api/v1/consumer/reports/{report_id}/documents/{attachment_id}` | Download supporting material. |
 
-Search and research accept `language=en`, `language=pt-BR`, or `language=es-419`. The question
-request body accepts the same `language` field. Use `refresh=true` on the research endpoint to
-bypass a fresh cached result.
-
-Interactive API documentation is available at `http://127.0.0.1:8000/docs` while the backend is
-running.
+Search and research support `en`, `pt-BR`, and `es-419`. Interactive OpenAPI documentation is
+available at `http://127.0.0.1:8000/docs` while the API is running.
 
 ## Run locally
 
@@ -315,36 +362,31 @@ running.
 - Python 3.14;
 - Node.js and npm;
 - Docker Desktop;
-- a Gemini API key for evidence synthesis, embeddings, and RAG answers;
-- optionally, a Tavily API key for higher public-web retrieval limits.
+- a Gemini API key;
+- a Tavily API key;
+- optionally, a data.gov key for USDA FoodData Central.
 
-Catalog search remains available without Gemini, while AI research and questions return a clear
-configuration error.
-
-### 1. Configure the environment
+### 1. Configure environment variables
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-Add the Gemini key only to the local `.env` file. Tavily works in free rate-limited keyless mode;
-an optional free Tavily account increases the monthly allowance:
+Add keys only to the local `.env` file:
 
 ```dotenv
 GEMINI_API_KEY=your-key-here
 TAVILY_API_KEY=your-key-here
+USDA_API_KEY=your-optional-data-gov-key
 ```
 
-The Tavily free account currently includes 1,000 monthly API credits without requiring a credit
-card. Leave `TAVILY_API_KEY` empty to use the lower-limit keyless mode during local development.
-
-Never commit `.env` or expose the key to the frontend.
+Never commit `.env` or expose provider credentials to the frontend.
 
 ### 2. Install the backend
 
-Activate the virtual environment and run:
-
 ```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 python -m pip install --editable ".[dev]"
 ```
 
@@ -355,8 +397,7 @@ docker compose up -d database
 python -m alembic upgrade head
 ```
 
-The local PostgreSQL service is exposed on port `5433` to avoid a common conflict with locally
-installed PostgreSQL instances.
+PostgreSQL is exposed locally on port `5433` to avoid conflicts with a default local installation.
 
 ### 4. Start the API
 
@@ -366,7 +407,7 @@ python -m uvicorn justsupply.main:app --reload
 
 ### 5. Start the frontend
 
-In another terminal:
+Open another terminal:
 
 ```powershell
 Set-Location frontend
@@ -384,10 +425,10 @@ Backend:
 python -m ruff format --check backend
 python -m ruff check backend
 python -m mypy backend\justsupply
-python -m pytest backend\tests
+python -m pytest
 ```
 
-PostgreSQL and pgvector integration test:
+PostgreSQL and pgvector integration tests:
 
 ```powershell
 $env:RUN_DATABASE_TESTS = "1"
@@ -399,42 +440,57 @@ Frontend:
 
 ```powershell
 Set-Location frontend
-npm test -- --run
 npm run lint
+npm run test:run
 npm run build
 ```
 
-## Current scope and next steps
+## Current scope and trade-offs
 
-The current MVP focuses on food-product discovery and evidence-backed explanations. Likely next
-steps include broader product catalogs, dedicated certification-registry integrations, richer
-environmental dimensions, automated evaluation datasets for retrieval and grounded answers,
-authentication, observability for model latency and cost, CI/CD, and public deployment.
+The current MVP focuses on food products and public evidence. Important limitations are explicit:
 
-The architecture intentionally keeps the evidence model broader than food so that future modules
-for cosmetics, household products, clothing, and electronics can reuse the same provenance and RAG
-foundations.
+- Open Food Facts and community reports may be incomplete or outdated.
+- Public sources can conflict or cover only one market, legal entity, or reporting period.
+- Company disclosures are self-reported unless independently corroborated.
+- Search coverage is not proof that information does or does not exist.
+- Community reports are intentionally unverified and currently have no authentication or reviewer
+  workflow.
+- Uploaded files are stored in PostgreSQL for the MVP; production deployment would benefit from
+  object storage, malware scanning, retention controls, and authenticated moderation.
+- External-provider latency and quotas affect uncached research.
 
-## Data and AI responsibility
+## Roadmap
 
-- Open Food Facts is community maintained and may be incomplete or outdated.
-- Public web sources can conflict or describe only a brand-level policy.
-- Tavily discovers sources, while Gemini summarizes evidence but is never stored as the source of
-  its own claim.
-- JustSupply displays uncertainty and source limitations instead of concealing them.
-- Consumers should inspect the original sources before making important decisions.
+- authentication and role-based moderation;
+- automated evaluation datasets for retrieval quality and grounded-answer faithfulness;
+- observability for provider latency, token usage, cost, and retrieval rejection reasons;
+- dedicated certification and employment-data adapters;
+- background processing for long-running research and file analysis;
+- CI/CD and public deployment;
+- broader catalogs for cosmetics, household products, clothing, and electronics.
 
-Official references:
+The evidence model is intentionally broader than food so future industries can reuse the same
+claims, provenance, entity-resolution, and RAG foundations.
 
-- [Open Food Facts API documentation](https://openfoodfacts.github.io/documentation/docs/Product-Opener/api/)
-- [Open Food Facts product schema](https://openfoodfacts.github.io/documentation/docs/Product-Opener/schemas/schemas/product/)
-- [The Vegan Society trademark search](https://www.vegansociety.com/resources/lifestyle/shopping/trademark-search)
-- [Vegan Action certified product information](https://vegan.org/certification/consumer-info)
-- [UK Gender Pay Gap downloads](https://gender-pay-gap.service.gov.uk/Viewing/download)
-- [Australian WGEA data](https://www.wgea.gov.au/data-statistics)
-- [SEC EDGAR APIs](https://www.sec.gov/search-filings/edgar-application-programming-interfaces)
-- [HRC employer equality search](https://www.hrc.org/resources/employers)
+## Responsible AI principles
+
+- A model output is never stored as the source of its own claim.
+- Public pages and product metadata are treated as untrusted input.
+- Findings remain traceable to original URLs and excerpts.
+- Product, brand, company, and jurisdiction scopes remain distinct.
+- Uncertainty is displayed rather than hidden behind confident prose.
+- Consumers are encouraged to inspect original sources before important decisions.
+
+## Data and API references
+
+- [Open Food Facts API](https://openfoodfacts.github.io/documentation/docs/Product-Opener/api/)
+- [USDA FoodData Central API](https://fdc.nal.usda.gov/fdc/v1/)
 - [Wikidata API](https://www.wikidata.org/w/api.php)
 - [Tavily Search API](https://docs.tavily.com/documentation/api-reference/endpoint/search)
 - [Gemini text generation](https://ai.google.dev/gemini-api/docs/text-generation)
 - [Gemini embeddings](https://ai.google.dev/gemini-api/docs/embeddings)
+- [Gemini Google Search Grounding](https://ai.google.dev/gemini-api/docs/google-search)
+- [UK Gender Pay Gap data](https://gender-pay-gap.service.gov.uk/Viewing/download)
+- [Australian WGEA data](https://www.wgea.gov.au/data-statistics)
+- [The Vegan Society trademark search](https://www.vegansociety.com/resources/lifestyle/shopping/trademark-search)
+- [Vegan Action certification information](https://vegan.org/certification/consumer-info)

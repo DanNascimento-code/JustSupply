@@ -17,6 +17,7 @@ from justsupply.database.models import (
     CommunityReportAssessmentModel,
     CommunityReportAttachmentModel,
     CommunityReportModel,
+    CommunityReportSourceModel,
     ConsumerAnswerCacheModel,
     EvidenceRecordModel,
     EvidenceSourceModel,
@@ -99,7 +100,7 @@ class StoredPublicCommunityReport:
     category: FoodCategory
     assessments: tuple[CommunityReportAssessment, ...]
     observations: str
-    evidence_url: str | None
+    evidence_urls: tuple[str, ...]
     has_photo: bool
     documents: tuple[StoredCommunityAttachment, ...]
     published_at: datetime
@@ -225,7 +226,6 @@ class SqlAlchemyConsumerEvidenceRepository:
             barcode=report.barcode,
             category=report.category.value,
             details=report.details,
-            evidence_url=str(report.evidence_url) if report.evidence_url is not None else None,
             photo_mime_type=photo_mime_type,
             photo_data=photo_data,
             status="published_unverified",
@@ -242,6 +242,14 @@ class SqlAlchemyConsumerEvidenceRepository:
                     outcome=assessment.outcome.value,
                 )
                 for assessment in report.assessments
+            )
+            self._session.add_all(
+                CommunityReportSourceModel(
+                    report_id=report_id,
+                    url=url,
+                    created_at=now,
+                )
+                for url in dict.fromkeys(str(item) for item in report.evidence_urls)
             )
             self._session.add_all(
                 CommunityReportAttachmentModel(
@@ -331,6 +339,16 @@ class SqlAlchemyConsumerEvidenceRepository:
                     data=attachment.file_data,
                 )
             )
+        sources_by_report: dict[UUID, list[str]] = {report_id: [] for report_id in report_ids}
+        for report_id, url in self._session.execute(
+            select(CommunityReportSourceModel.report_id, CommunityReportSourceModel.url)
+            .where(CommunityReportSourceModel.report_id.in_(report_ids))
+            .order_by(
+                CommunityReportSourceModel.created_at,
+                CommunityReportSourceModel.url,
+            )
+        ).all():
+            sources_by_report[report_id].append(url)
         return [
             StoredPublicCommunityReport(
                 id=report.id,
@@ -339,7 +357,7 @@ class SqlAlchemyConsumerEvidenceRepository:
                 category=FoodCategory(report.category),
                 assessments=tuple(assessments_by_report[report.id]),
                 observations=report.details,
-                evidence_url=report.evidence_url,
+                evidence_urls=tuple(sources_by_report[report.id]),
                 has_photo=report.photo_data is not None,
                 documents=tuple(documents_by_report[report.id]),
                 published_at=report.created_at,
@@ -572,8 +590,33 @@ class SqlAlchemyConsumerEvidenceRepository:
                 self._session.flush()
                 product = self._upsert_product(catalog_product, brand, now)
                 source = self._upsert_catalog_source(catalog_product, now)
+                sources_by_url = {source.url: source}
+                assessment_sources: dict[AssessmentDimension, EvidenceSourceModel] = {}
+                for assessment in assessed_product.assessments:
+                    if not assessment.sources:
+                        continue
+                    assessment_source = assessment.sources[0]
+                    stored_source = sources_by_url.get(assessment_source.url)
+                    if stored_source is None:
+                        stored_source = self._upsert_source(
+                            provider=assessment_source.provider_name,
+                            title=assessment_source.title,
+                            url=assessment_source.url,
+                            source_type="public_database",
+                            published_at=assessment_source.published_at,
+                            now=now,
+                        )
+                        sources_by_url[assessment_source.url] = stored_source
+                    assessment_sources[assessment.dimension] = stored_source
                 self._session.flush()
-                self._upsert_catalog_claims(assessed_product, product, brand, source, now)
+                self._upsert_catalog_claims(
+                    assessed_product,
+                    product,
+                    brand,
+                    source,
+                    assessment_sources,
+                    now,
+                )
             self._session.commit()
         except IntegrityError as error:
             self._session.rollback()
@@ -916,6 +959,7 @@ class SqlAlchemyConsumerEvidenceRepository:
         product: ProductModel,
         brand: BrandModel | None,
         source: EvidenceSourceModel,
+        assessment_sources: dict[AssessmentDimension, EvidenceSourceModel],
         now: datetime,
     ) -> None:
         for assessment in assessed_product.assessments:
@@ -956,7 +1000,8 @@ class SqlAlchemyConsumerEvidenceRepository:
                 AssessmentStatus.NOT_DISCLOSED,
                 AssessmentStatus.UNKNOWN,
             }:
-                self._link_catalog_evidence(claim, source, assessment.finding, now)
+                assessment_source = assessment_sources.get(assessment.dimension, source)
+                self._link_catalog_evidence(claim, assessment_source, assessment.finding, now)
 
     def _find_claim(
         self,
@@ -1064,8 +1109,8 @@ class SqlAlchemyConsumerEvidenceRepository:
         now: datetime,
     ) -> EvidenceSourceModel:
         return self._upsert_source(
-            provider="Open Food Facts",
-            title=f"{item.name} — Open Food Facts",
+            provider=item.source_name,
+            title=f"{item.name} — {item.source_name}",
             url=item.source_url,
             source_type="public_database",
             published_at=item.last_updated_at,
@@ -1157,7 +1202,8 @@ def _fingerprint_bytes(value: bytes) -> str:
 
 
 def _query_key(query: str) -> str:
-    return _fingerprint(" ".join(query.split()).casefold())
+    normalized = " ".join(query.split()).casefold()
+    return _fingerprint(f"catalog-v2:{normalized}")
 
 
 def _question_key(question: str) -> str:
@@ -1190,6 +1236,10 @@ def _catalog_product_to_json(product: CatalogProduct) -> dict[str, object]:
         "forest_footprint_attribute": _attribute_to_json(product.forest_footprint_attribute),
         "ingredients_image_url": product.ingredients_image_url,
         "brand_owner": product.brand_owner,
+        "source_name": product.source_name,
+        "ingredients_source_url": product.ingredients_source_url,
+        "ingredients_source_name": product.ingredients_source_name,
+        "catalog_degraded": product.catalog_degraded,
     }
 
 
@@ -1216,6 +1266,10 @@ def _catalog_product_from_json(payload: dict[str, object]) -> CatalogProduct:
         ),
         ingredients_image_url=_optional_string(payload.get("ingredients_image_url")),
         brand_owner=_optional_string(payload.get("brand_owner")),
+        source_name=_optional_string(payload.get("source_name")) or "Open Food Facts",
+        ingredients_source_url=_optional_string(payload.get("ingredients_source_url")),
+        ingredients_source_name=_optional_string(payload.get("ingredients_source_name")),
+        catalog_degraded=payload.get("catalog_degraded") is True,
     )
 
 

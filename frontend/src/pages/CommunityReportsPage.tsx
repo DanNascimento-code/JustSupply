@@ -107,7 +107,11 @@ export function CommunityReportsPage() {
                     </a>
                   ) : null}
                   <div className="public-report-links">
-                    {report.evidence_url ? <a href={report.evidence_url} target="_blank" rel="noreferrer">{t('openSubmittedSource')} ↗</a> : null}
+                    {report.evidence_urls.map((url, index) => (
+                      <a href={url} key={url} target="_blank" rel="noreferrer">
+                        {t('openSubmittedSource')} {index + 1} ↗
+                      </a>
+                    ))}
                     {report.documents.map((document) => (
                       <a href={`${API_BASE_URL}${document.download_url}`} key={document.id}>
                         {t('downloadSubmittedDocument', { name: document.file_name })}
