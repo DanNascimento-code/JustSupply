@@ -1,10 +1,18 @@
 <p align="center">
-  <img src="frontend/public/justsupply-logo-no-check.png" alt="JustSupply logo" width="150" />
+  <a href="https://justsupply.vercel.app/">
+    <img src="frontend/public/justsupply-logo-no-check.png" alt="JustSupply logo" width="150" />
+  </a>
 </p>
 
 # JustSupply
 
 **An evidence-first product research platform for ethical purchasing decisions.**
+
+<p>
+  <a href="https://justsupply.vercel.app/"><strong>Explore the live application →</strong></a>
+  <br />
+  <sub>Production deployment hosted on Vercel.</sub>
+</p>
 
 JustSupply helps consumers investigate what sits behind everyday product claims. Search by product
 name, brand, or barcode to review vegan composition, environmental impact, fair pay and
